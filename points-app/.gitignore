@@ -1,0 +1,50 @@
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+/.pub-cache/
+build/
+/.idea/
+.vscode/
+android/local.properties
+
+# iOS
+Pods/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+/.env
+*.env
+
+# Backend
+/backend/secrets/
+/backend/.env
+/backend/.venv/
+
+# Logs
+*.log
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# IDE and editor
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+/.vscode/
+
+# Other artifacts
+*.class
+*.jar
+*.war

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/auth_provider.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -37,12 +39,17 @@ class AppDrawer extends StatelessWidget {
             // Logout button aligned at the bottom
             Padding(
               padding: const EdgeInsets.all(8.0),
-              child: ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Logout'),
-                onTap: () {
-                  // TODO: Clear auth state / tokens here before navigating.
-                  Navigator.pushReplacementNamed(context, '/login');
+              child: Consumer(
+                builder: (context, ref, _) {
+                  return ListTile(
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Logout'),
+                    onTap: () async {
+                      await ref.read(authProvider.notifier).logout();
+                      // Clear navigation and return to login
+                      Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+                    },
+                  );
                 },
               ),
             ),

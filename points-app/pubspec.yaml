@@ -10,6 +10,7 @@ dependencies:
   flutter_riverpod: ^2.4.0
   http: ^0.13.6
   shared_preferences: ^2.0.15
+  flutter_secure_storage: ^8.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

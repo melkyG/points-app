@@ -14,10 +14,12 @@ from pydantic import BaseModel, EmailStr
 import os
 import httpx
 import jwt
+import secrets
 import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 load_dotenv()
 
@@ -99,18 +101,119 @@ async def login(req: LoginRequest):
 
     try:
         token = jwt.encode(token_payload, JWT_SECRET, algorithm='HS256')
-        # PyJWT may return bytes in some versions; ensure string
         if isinstance(token, bytes):
             token = token.decode('utf-8')
     except Exception as e:
         logger.exception('Failed to encode JWT')
         raise HTTPException(status_code=500, detail='Failed to create access token')
 
-    return {'access_token': token, 'token_type': 'bearer', 'uid': uid, 'email': email}
+    # Issue a refresh token and store it
+    refresh = _create_refresh_token(uid, email)
+
+    return {
+        'access_token': token,
+        'token_type': 'bearer',
+        'uid': uid,
+        'email': email,
+        'refresh_token': refresh,
+    }
 
 
 @app.get('/ping')
 async def ping():
     return {'ok': True}
+
+
+# Simple in-memory blacklist for revoked tokens (development only).
+# In production use a persistent store (Redis, database) with TTL.
+_revoked_tokens = set()
+
+# In-memory store for refresh tokens: token -> {uid, email, expires}
+_refresh_tokens = {}
+# Blacklist for revoked refresh tokens
+_revoked_refresh_tokens = set()
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+@app.post('/auth/logout')
+async def logout(req: LogoutRequest):
+    """Validate the provided JWT and add it to the in-memory blacklist.
+
+    Request body: {"refresh_token": "<token>"}
+    """
+    token = req.refresh_token
+    if not token:
+        raise HTTPException(status_code=400, detail='refresh_token is required')
+
+    # If refresh token already revoked, treat as success
+    if token in _revoked_refresh_tokens:
+        return {'message': 'Logged out successfully'}
+
+    # Check presence in refresh store
+    entry = _refresh_tokens.get(token)
+    if not entry:
+        # token not recognized
+        raise HTTPException(status_code=401, detail='Invalid refresh token')
+
+    # Revoke: remove from store and add to revoked set
+    try:
+        del _refresh_tokens[token]
+    except KeyError:
+        pass
+    _revoked_refresh_tokens.add(token)
+    logger.info('Revoked refresh token for uid=%s', entry.get('uid'))
+
+    return {'message': 'Logged out successfully'}
+
+
+def _create_refresh_token(uid: str, email: str, days: int = 30):
+    token = secrets.token_urlsafe(48)
+    expires = int((datetime.utcnow() + timedelta(days=days)).timestamp())
+    _refresh_tokens[token] = {'uid': uid, 'email': email, 'expires': expires}
+    return token
+
+
+@app.post('/refresh')
+async def refresh_token(body: dict):
+    """Exchange a valid refresh token for a new access token.
+
+    Expected body: {"refresh_token": "..."}
+    """
+    token = body.get('refresh_token')
+    if not token:
+        raise HTTPException(status_code=400, detail='refresh_token is required')
+
+    if token in _revoked_refresh_tokens:
+        raise HTTPException(status_code=401, detail='Refresh token revoked')
+
+    entry = _refresh_tokens.get(token)
+    if not entry:
+        raise HTTPException(status_code=401, detail='Invalid refresh token')
+
+    if entry.get('expires', 0) < int(datetime.utcnow().timestamp()):
+        # expired
+        # ensure it's removed
+        try:
+            del _refresh_tokens[token]
+        except KeyError:
+            pass
+        raise HTTPException(status_code=401, detail='Refresh token expired')
+
+    # Create new access token
+    now = datetime.utcnow()
+    payload = {
+        'sub': entry['uid'],
+        'email': entry['email'],
+        'iat': int(now.timestamp()),
+        'exp': int((now + timedelta(hours=1)).timestamp())
+    }
+    access = jwt.encode(payload, JWT_SECRET, algorithm='HS256')
+    if isinstance(access, bytes):
+        access = access.decode('utf-8')
+
+    return {'access_token': access, 'token_type': 'bearer', 'uid': entry['uid'], 'email': entry['email']}
 
 # Future: add endpoints to verify token, refresh tokens, use Firebase Admin SDK, etc.

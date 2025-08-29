@@ -11,12 +11,14 @@ class RegisterPage extends ConsumerStatefulWidget {
 
 class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _emailController = TextEditingController();
+  final _accountController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   bool _loading = false;
 
   @override
   void dispose() {
+    _accountController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
@@ -24,9 +26,16 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   }
 
   Future<void> _register() async {
+    final account = _accountController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final confirm = _confirmController.text;
+
+    // Validate accountName
+    if (account.isEmpty || account.length < 3 || account.length > 30) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account name must be 3-30 characters')));
+      return;
+    }
 
     if (password != confirm) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
@@ -35,7 +44,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
     setState(() => _loading = true);
     try {
-      await ref.read(authProvider.notifier).register(email, password);
+  await ref.read(authProvider.notifier).register(email, password, account);
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
     } catch (e) {
       final msg = e is Exception ? e.toString() : 'Registration failed';
@@ -56,6 +65,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
             children: [
               const Text('Register', style: TextStyle(fontSize: 32)),
               const SizedBox(height: 24),
+              TextField(controller: _accountController, decoration: const InputDecoration(labelText: 'Account name')),
+              const SizedBox(height: 12),
               TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email')),
               const SizedBox(height: 12),
               TextField(controller: _passwordController, decoration: const InputDecoration(labelText: 'Password'), obscureText: true),

@@ -4,3 +4,5 @@ httpx
 PyJWT
 python-dotenv
 email-validator
+firebase-admin
+google-cloud-firestore

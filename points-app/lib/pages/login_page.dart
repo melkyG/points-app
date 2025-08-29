@@ -12,7 +12,7 @@ class LoginPage extends ConsumerStatefulWidget {
 
 class _LoginPageState extends ConsumerState<LoginPage> {
   final _emailController = TextEditingController(text: 'test@gmail.com');
-  final _passwordController = TextEditingController(text: 'password');
+  final _passwordController = TextEditingController(text: 'testing');
   bool _loading = false;
 
   Future<void> _attemptLogin() async {

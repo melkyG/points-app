@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
+ 
 
-class AppDrawer extends StatelessWidget {
+class AppDrawer extends ConsumerStatefulWidget {
   const AppDrawer({super.key});
 
   @override
+  ConsumerState<AppDrawer> createState() => _AppDrawerState();
+}
+
+class _AppDrawerState extends ConsumerState<AppDrawer> {
+  @override
   Widget build(BuildContext context) {
+  // Debug: print the cached accountName from the provider to verify updates
+  print(ref.watch(authProvider)?.accountName);
+  final user = ref.watch(authProvider);
+    final email = user?.email ?? '';
+    final accountName = user?.accountName;
+
     return Drawer(
       child: SafeArea(
         child: Column(
@@ -14,15 +26,16 @@ class AppDrawer extends StatelessWidget {
           children: [
             Column(
               children: [
-                const UserAccountsDrawerHeader(
-                  accountName: Text('Account Name'),
-                  accountEmail: Text('email@example.com'),
+                UserAccountsDrawerHeader(
+                  accountName: accountName == null
+                      ? const SizedBox(width: 120, height: 16, child: LinearProgressIndicator())
+                      : Text(accountName),
+                  accountEmail: Text(email.isNotEmpty ? email : 'email@example.com'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.person),
                   title: const Text('Account'),
                   onTap: () {
-                    // TODO: Show account details or navigate when implemented.
                     Navigator.pop(context);
                   },
                 ),
@@ -30,7 +43,6 @@ class AppDrawer extends StatelessWidget {
                   leading: const Icon(Icons.settings),
                   title: const Text('Settings'),
                   onTap: () {
-                    // TODO: Open settings screen when implemented.
                     Navigator.pop(context);
                   },
                 ),

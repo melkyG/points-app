@@ -65,6 +65,27 @@ class AuthNotifier extends StateNotifier<User?> {
     }
   }
 
+  /// Register a new user via backend /register. On success this does not
+  /// log the user in; caller should navigate to LoginPage.
+  Future<void> register(String email, String password) async {
+    final url = Uri.parse('http://127.0.0.1:8000/register');
+    final resp = await http.post(url,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'email': email, 'password': password}));
+
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      // Registration succeeded. Backend may return details in body.
+      return;
+    } else {
+      String msg = 'Registration failed: HTTP ${resp.statusCode}';
+      try {
+        final body = json.decode(resp.body);
+        if (body is Map && body['detail'] != null) msg = 'Registration failed: ${body['detail']}';
+      } catch (_) {}
+      throw Exception(msg);
+    }
+  }
+
   /// Decode JWT and return expiry (exp) as epoch seconds, or null.
   int? _parseJwtExpiry(String token) {
     try {

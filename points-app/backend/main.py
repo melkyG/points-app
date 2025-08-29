@@ -119,6 +119,41 @@ async def login(req: LoginRequest):
     }
 
 
+@app.post('/register')
+async def register(req: LoginRequest):
+    """Create a new Firebase user via REST API (signUp).
+
+    Returns 201 with uid and email on success.
+    """
+    if not WEB_API_KEY:
+        logger.error('FIREBASE_WEB_API_KEY not configured')
+        raise HTTPException(status_code=500, detail='FIREBASE_WEB_API_KEY not configured')
+
+    firebase_url = f'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={WEB_API_KEY}'
+    payload = {'email': req.email, 'password': req.password, 'returnSecureToken': True}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(firebase_url, json=payload, timeout=10.0)
+        except httpx.RequestError as e:
+            logger.exception('Error contacting Firebase for register')
+            raise HTTPException(status_code=502, detail=f'Error contacting Firebase: {e}')
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json()
+            msg = err.get('error', {}).get('message', '')
+        except Exception:
+            msg = resp.text
+        logger.info('Registration failed for %s: %s', req.email, msg)
+        raise HTTPException(status_code=400, detail=f'Registration failed: {msg}')
+
+    data = resp.json()
+    uid = data.get('localId')
+    email = data.get('email')
+    return HTTPException(status_code=201, detail={'uid': uid, 'email': email})
+
+
 @app.get('/ping')
 async def ping():
     return {'ok': True}

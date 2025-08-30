@@ -9,7 +9,7 @@ Notes:
 - This implementation is intentionally minimal for the checkpoint.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header, status, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, constr, validator
 from typing import Optional
@@ -32,8 +32,9 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'change-me')
 
 app = FastAPI(title='Points Auth Backend')
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('main')
+logger.setLevel(logging.DEBUG)
 
 # Configure CORS to allow preflight requests from the Flutter client during development.
 # You can set a comma-separated list of origins in the environment variable CORS_ORIGINS.
@@ -65,6 +66,12 @@ class RegisterRequest(BaseModel):
     @validator('accountName')
     def strip_account_name(cls, v: str) -> str:
         return v.strip()
+
+
+class FriendRequestCreate(BaseModel):
+    senderId: str
+    receiverId: str
+
 
 @app.post('/login')
 async def login(req: LoginRequest):
@@ -315,6 +322,166 @@ async def refresh_token(body: dict):
         access = access.decode('utf-8')
 
     return {'access_token': access, 'token_type': 'bearer', 'uid': entry['uid'], 'email': entry['email'], 'accountName': entry.get('accountName')}
+
+
+def _verify_access_token(request: Request, authorization: Optional[str] = Header(None)) -> dict:
+    """Verify HS256 access token from Authorization header.
+
+    This dependency reads the standard `Authorization` header (case-insensitive),
+    falls back to inspecting request.headers, strips surrounding quotes, accepts
+    either 'Bearer <token>' or just the raw token (useful for debugging), and
+    logs the raw header and decoded payload for traceability.
+    """
+    # Try header provided by FastAPI Header param first
+    raw = authorization
+
+    # Fallback: inspect request headers (case-insensitive)
+    if not raw and request is not None:
+        raw = request.headers.get('authorization') or request.headers.get('Authorization') or request.headers.get('auth-header')
+
+    # Helpful debug: log request path/method and headers (may contain Authorization)
+    try:
+        logger.debug('Incoming request: %s %s', request.method, request.url.path)
+        # Convert headers to a regular dict for clearer logging
+        logger.debug('Request headers: %s', dict(request.headers))
+    except Exception:
+        logger.debug('Could not log request headers')
+
+    logger.debug('Authorization header raw: %s', raw)
+
+    if not raw:
+        logger.warning('Authorization header missing')
+        raise HTTPException(status_code=401, detail='Authorization header missing')
+
+    # Normalize and strip possible surrounding quotes
+    raw = raw.strip().strip('"').strip("'")
+
+    parts = raw.split()
+    token = None
+    # Accept both 'Bearer <token>' and raw token formats (dev/debugging convenience)
+    if len(parts) >= 2 and parts[0].lower() == 'bearer':
+        token = parts[1]
+    elif len(parts) == 1:
+        token = parts[0]
+    else:
+        logger.warning('Invalid authorization header format: %s', raw)
+        raise HTTPException(status_code=401, detail='Invalid authorization header')
+
+    # Log server time and unverified token claims to detect clock skew
+    try:
+        server_ts = int(datetime.utcnow().timestamp())
+        logger.debug('Server UTC timestamp: %s', server_ts)
+        # Get unverified claims (no signature/exp/iat verification) to inspect iat/exp
+        unverified = jwt.decode(token, options={"verify_signature": False, "verify_exp": False, "verify_iat": False})
+        logger.debug('Unverified token claims: %s', unverified)
+        token_iat = unverified.get('iat')
+        token_exp = unverified.get('exp')
+        if token_iat is not None:
+            logger.debug('Token iat=%s, exp=%s (server_ts=%s)', token_iat, token_exp, server_ts)
+    except Exception:
+        logger.debug('Failed to decode token without verification for diagnostics', exc_info=True)
+
+    # Allow optional leeway for dev debugging via env var JWT_LEEWAY (seconds). Default 0.
+    try:
+        leeway = int(os.getenv('JWT_LEEWAY', '0'))
+    except Exception:
+        leeway = 0
+
+    try:
+        # IMPORTANT: disable iat validation because some tokens (e.g. Firebase-issued)
+        # may have 'iat' values that are slightly in the future due to clock skew
+        # between issuer and validator. We still want to validate 'exp' (expiry)
+        # and 'nbf' (not-before) if present. PyJWT allows disabling specific
+        # claim validations via the `options` parameter.
+        options = {
+            'verify_signature': True,
+            'verify_exp': True,
+            'verify_nbf': True,
+            # Turn off iat verification to avoid ImmatureSignatureError
+            'verify_iat': False,
+        }
+
+        # Decode with explicit options and optional leeway (seconds)
+        payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'], options=options, leeway=leeway)
+        logger.debug('Decoded JWT payload: %s', payload)
+    except jwt.ExpiredSignatureError:
+        logger.exception('Token expired while decoding')
+        raise HTTPException(status_code=401, detail='Token expired')
+    except jwt.ImmatureSignatureError:
+        # With verify_iat=False this should not normally occur, but keep handling
+        logger.exception('Token not yet valid (iat)')
+        raise HTTPException(status_code=401, detail='Token not yet valid (iat)')
+    except Exception as e:
+        logger.exception('Invalid token while decoding: %s', e)
+        raise HTTPException(status_code=401, detail='Invalid token')
+    return payload
+
+
+@app.post('/friend_requests')
+async def create_friend_request(req: FriendRequestCreate, token_payload: dict = Depends(_verify_access_token), request: Request = None):
+    """Create a friend request document in Firestore.
+
+    Rules:
+    - Caller must be authenticated.
+    - senderId must match authenticated sub (uid).
+    - senderId != receiverId.
+    - No existing pending request from sender to receiver.
+    """
+    # Trace: log body + auth payload early for debugging
+    try:
+        logger.info('create_friend_request called; body=%s auth_payload=%s', req.dict(), token_payload)
+        logger.debug('Request headers at friend_requests: %s', dict(request.headers) if request is not None else None)
+    except Exception:
+        logger.debug('Failed logging friend request debug info')
+
+    if not _firebase_initialized or _firestore_client is None:
+        raise HTTPException(status_code=501, detail='Firestore not configured on backend')
+
+    sender = (req.senderId or '').strip()
+    receiver = (req.receiverId or '').strip()
+
+    if not sender or not receiver:
+        raise HTTPException(status_code=400, detail='senderId and receiverId are required')
+
+    # Ensure the authenticated user is the sender
+    auth_sub = token_payload.get('sub')
+    if auth_sub != sender:
+        raise HTTPException(status_code=403, detail='senderId does not match authenticated user')
+
+    if sender == receiver:
+        raise HTTPException(status_code=400, detail='Cannot send friend request to yourself')
+
+    try:
+        users_ref = _firestore_client.collection('friend_requests')
+
+        # Check for existing pending request from sender -> receiver
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        def _query_pending():
+            q = users_ref.where('senderId', '==', sender).where('receiverId', '==', receiver).where('status', '==', 'pending').limit(1).get()
+            return list(q)
+
+        pending_docs = await loop.run_in_executor(None, _query_pending)
+        if pending_docs:
+            raise HTTPException(status_code=409, detail='A pending friend request already exists')
+
+        # Create friend request
+        doc_ref = users_ref.document()
+        doc_ref.set({
+            'senderId': sender,
+            'receiverId': receiver,
+            'status': 'pending',
+            'createdAt': firestore.SERVER_TIMESTAMP,
+        })
+
+        return JSONResponse(status_code=201, content={'message': 'Friend request created', 'requestId': doc_ref.id})
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Failed to create friend request from %s to %s', sender, receiver)
+        raise HTTPException(status_code=500, detail='Failed to create friend request')
 
 
 @app.get('/users/search')

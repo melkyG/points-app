@@ -43,10 +43,33 @@ class AuthNotifier extends StateNotifier<User?> {
     final uid = await _storage.read(key: 'uid');
     final account = await _storage.read(key: 'accountName');
     if (token != null && email != null && uid != null) {
-      state = User(uid: uid, email: email, token: token, accountName: account);
-  _scheduleRefreshIfNeeded(token);
-  // start listening to Firestore profile updates
-  _startProfileListener(uid);
+      // Validate token looks like our backend HS256 token before trusting it
+      if (_isHs256Token(token)) {
+        state = User(uid: uid, email: email, token: token, accountName: account);
+        _scheduleRefreshIfNeeded(token);
+        // start listening to Firestore profile updates
+        _startProfileListener(uid);
+      } else {
+        // Token is not backend-issued HS256 token; clear stored jwt to force re-login
+        await _storage.delete(key: 'jwt');
+        developer.log('Discarded non-HS256 token from storage');
+      }
+    }
+  }
+
+  bool _isHs256Token(String? token) {
+    if (token == null) return false;
+    final parts = token.split('.');
+    if (parts.length != 3) return false;
+    try {
+      final header = parts[0];
+      final normalized = base64Url.normalize(header);
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final map = json.decode(decoded) as Map<String, dynamic>;
+      final alg = map['alg'] as String?;
+      return alg == 'HS256';
+    } catch (_) {
+      return false;
     }
   }
 
@@ -60,29 +83,35 @@ class AuthNotifier extends StateNotifier<User?> {
     if (resp.statusCode == 200) {
       final data = json.decode(resp.body) as Map<String, dynamic>;
       final token = data['access_token'] as String?;
-  final uid = data['uid'] as String?;
-  final userEmail = data['email'] as String?;
-  final accountName = data['accountName'] as String?;
-  final refresh = data['refresh_token'] as String?;
+      final uid = data['uid'] as String?;
+      final userEmail = data['email'] as String?;
+      final accountName = data['accountName'] as String?;
+      final refresh = data['refresh_token'] as String?;
 
       if (token == null || uid == null || userEmail == null) {
         throw Exception('Invalid response from auth server');
       }
 
-  // Persist token and user info in secure storage.
-  await _storage.write(key: 'jwt', value: token);
-  if (refresh != null) await _storage.write(key: 'refresh_token', value: refresh);
-  if (accountName != null) await _storage.write(key: 'accountName', value: accountName);
-  await _storage.write(key: 'email', value: userEmail);
-  await _storage.write(key: 'uid', value: uid);
-  state = User(uid: uid, email: userEmail, token: token, accountName: accountName);
-  _scheduleRefreshIfNeeded(token);
+      // Ensure token is the backend HS256 token and not a Firebase ID token
+      if (!_isHs256Token(token)) {
+        throw Exception('Login returned invalid token type');
+      }
+
+      // Persist token and user info in secure storage.
+      await _storage.write(key: 'jwt', value: token);
+      if (refresh != null) await _storage.write(key: 'refresh_token', value: refresh);
+      if (accountName != null) await _storage.write(key: 'accountName', value: accountName);
+      await _storage.write(key: 'email', value: userEmail);
+      await _storage.write(key: 'uid', value: uid);
+      state = User(uid: uid, email: userEmail, token: token, accountName: accountName);
+  developer.log('AuthNotifier: login succeeded, token length=${token.length}, HS256=${_isHs256Token(token)}');
+      _scheduleRefreshIfNeeded(token);
       // If accountName wasn't returned, fetch it async from backend
       if (accountName == null) {
         _fetchProfileIfNeeded(uid);
       }
-  // start realtime listener for profile updates
-  _startProfileListener(uid);
+      // start realtime listener for profile updates
+      _startProfileListener(uid);
     } else if (resp.statusCode == 401) {
       final msg = resp.body.isNotEmpty ? resp.body : 'Unauthorized';
       throw Exception('Login failed: $msg');
@@ -176,7 +205,13 @@ class AuthNotifier extends StateNotifier<User?> {
           throw Exception('Invalid refresh response');
         }
 
-        await _storage.write(key: 'jwt', value: newToken);
+          // Ensure the refresh response contains backend HS256 token
+          if (!_isHs256Token(newToken)) {
+            throw Exception('Refresh returned invalid token type');
+          }
+
+          await _storage.write(key: 'jwt', value: newToken);
+          developer.log('AuthNotifier: refresh succeeded, token length=${newToken.length}, HS256=${_isHs256Token(newToken)}');
         if (accountName != null) await _storage.write(key: 'accountName', value: accountName);
         state = User(uid: uid, email: email, token: newToken, accountName: accountName);
         _scheduleRefreshIfNeeded(newToken);

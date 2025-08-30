@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'pages/login_page.dart';
 import 'pages/register_page.dart';
 import 'pages/main_screen.dart';
@@ -11,7 +12,7 @@ void main() {
   runApp(
     ProviderScope(
       child: FutureBuilder(
-        future: Firebase.initializeApp(),
+  future: Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const MaterialApp(home: Scaffold(body: Center(child: CircularProgressIndicator())));

@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:developer' as developer;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'dart:async' show StreamSubscription;
 
 class User {
@@ -16,6 +17,15 @@ class User {
   User({required this.uid, required this.email, required this.token, this.accountName});
 
   Map<String, dynamic> toJson() => {'uid': uid, 'email': email, 'token': token, 'accountName': accountName};
+
+  User copyWith({String? uid, String? email, String? token, String? accountName}) {
+    return User(
+      uid: uid ?? this.uid,
+      email: email ?? this.email,
+      token: token ?? this.token,
+      accountName: accountName ?? this.accountName,
+    );
+  }
 }
 
 class AuthNotifier extends StateNotifier<User?> {
@@ -238,16 +248,30 @@ class AuthNotifier extends StateNotifier<User?> {
     }
   }
 
-  void _startProfileListener(String uid) {
+  Future<void> _startProfileListener(String uid) async {
     // cancel existing
-    _profileSub?.cancel();
     try {
+      await _profileSub?.cancel();
+    } catch (_) {}
+    developer.log('AuthNotifier: starting profile listener for uid=$uid');
+    try {
+      // Ensure Firebase is initialized before subscribing.
+      if (Firebase.apps.isEmpty) {
+        developer.log('AuthNotifier: Firebase not initialized, awaiting Firebase.initializeApp()');
+        try {
+          await Firebase.initializeApp();
+        } catch (e) {
+          developer.log('AuthNotifier: Firebase.initializeApp() error (may already be initialized): $e');
+        }
+      }
+
       final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
       _profileSub = docRef.snapshots().listen((snapshot) async {
-        if (snapshot.exists) {
-          final data = snapshot.data();
-          final accountName = data?['accountName'] as String?;
-          final email = data?['email'] as String?;
+        final data = snapshot.data();
+        developer.log('Firestore snapshot data for $uid: $data');
+        if (data != null) {
+          final accountName = data['accountName'] as String?;
+          final email = data['email'] as String?;
           if (accountName != null) {
             await _storage.write(key: 'accountName', value: accountName);
           }
@@ -255,14 +279,18 @@ class AuthNotifier extends StateNotifier<User?> {
             await _storage.write(key: 'email', value: email);
           }
           if (state != null && state!.uid == uid) {
-            state = User(uid: state!.uid, email: email ?? state!.email, token: state!.token, accountName: accountName ?? state!.accountName);
+            state = state!.copyWith(
+              accountName: accountName ?? state!.accountName,
+              email: email ?? state!.email,
+            );
           }
         }
       }, onError: (e) {
-        developer.log('Profile listener error: $e');
+        developer.log('Firestore listener error for uid=$uid: $e');
       });
+      developer.log('AuthNotifier: profile listener subscribed for uid=$uid');
     } catch (e) {
-      developer.log('Failed to start profile listener: $e');
+      developer.log('AuthNotifier: failed to start profile listener for uid=$uid: $e');
     }
   }
 

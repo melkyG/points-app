@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MessagingPage extends StatelessWidget {
   const MessagingPage({super.key});
@@ -50,9 +51,17 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
   List<Map<String, dynamic>> _results = [];
   // Track per-user friend request status locally: 'add'|'sent'|'friends'
   final Map<String, String> _friendStatus = {};
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _friendSubs = {};
 
   @override
   void dispose() {
+    // Cancel all friend request listeners
+    for (final sub in _friendSubs.values) {
+      try {
+        sub.cancel();
+      } catch (_) {}
+    }
+    _friendSubs.clear();
     _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -121,9 +130,7 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
                       title: Text(account),
                       subtitle: Text(email),
                       trailing: ElevatedButton(
-                        onPressed: disabled
-                            ? null
-                            : () => _onAddPressed(userId),
+                        onPressed: disabled ? null : () => _onAddPressed(userId),
                         child: Text(buttonText),
                       ),
                     );
@@ -153,25 +160,31 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
 
   Future<bool> _sendFriendRequest(String receiverId) async {
     // Try to obtain a valid backend HS256 token from the auth provider.
-    var user = ref.read(authProvider);
-    String? token = user?.token?.trim();
-    String? senderId = user?.uid;
+    final current = ref.read(authProvider);
+    if (current == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+      return false;
+    }
 
-    // If missing, attempt one refresh and re-read
-    if (token == null || token.isEmpty) {
-      // Attempt to refresh the token via auth notifier; this may log out on failure.
+  String token = current.token.trim();
+    String senderId = current.uid;
+
+    // If token missing, attempt one refresh and re-read
+    if (token.isEmpty) {
       try {
         await ref.read(authProvider.notifier).refresh();
       } catch (_) {}
-      user = ref.read(authProvider);
-      token = user?.token?.trim();
-      senderId = user?.uid;
+      final refreshed = ref.read(authProvider);
+      if (refreshed == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+        return false;
+      }
+  token = refreshed.token.trim();
+      senderId = refreshed.uid;
     }
 
-    if (token == null || token.isEmpty || senderId == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
-      }
+    if (token.isEmpty || senderId.isEmpty) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
       return false;
     }
 
@@ -182,60 +195,47 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
       return false;
     }
 
-    // Check header alg is HS256 and check expiry. If expired, try refresh once.
-    bool attemptedRefresh = false;
-    bool needsRetry = false;
+    // Helper to normalize base64url padding
+    String _normalizeBase64(String input) {
+      final mod = input.length % 4;
+      if (mod == 0) return input;
+      return input + List.filled(4 - mod, '=').join();
+    }
 
-    for (;;) {
-      try {
-        final headerRaw = parts[0];
-        final payloadRaw = parts[1];
-        String normalized = base64Url.normalize(headerRaw);
-        final headerJson = json.decode(utf8.decode(base64Url.decode(normalized))) as Map<String, dynamic>;
-        final alg = headerJson['alg'] as String?;
-        if (alg != 'HS256') {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Token algorithm not supported')));
-          return false;
-        }
-
-        // Check exp
-        normalized = base64Url.normalize(payloadRaw);
-        final payloadJson = json.decode(utf8.decode(base64Url.decode(normalized))) as Map<String, dynamic>;
-        final exp = payloadJson['exp'] as int?;
-        if (exp != null) {
-          final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
-          if (exp < now) {
-            // expired -> try refresh once
-            if (!attemptedRefresh) {
-              attemptedRefresh = true;
-              needsRetry = true;
-              await ref.read(authProvider.notifier).refresh();
-              user = ref.read(authProvider);
-              token = user?.token?.trim();
-              senderId = user?.uid;
-              if (token == null || token.isEmpty || senderId == null) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
-                return false;
-              }
-              // recompute parts and loop to re-validate
-              if (token.split('.').length != 3) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid token format after refresh')));
-                return false;
-              }
-              // update parts and continue loop
-              parts.setRange(0, 3, token.split('.'));
-              continue;
-            } else {
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Token expired')));
-              return false;
-            }
-          }
-        }
-        break;
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid token: $e')));
+    // Decode header & payload and validate alg + expiry. Try one refresh if expired.
+    try {
+      final headerJson = json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[0])))) as Map<String, dynamic>;
+      final alg = headerJson['alg'] as String?;
+      if (alg != 'HS256') {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Token algorithm not supported')));
         return false;
       }
+
+      final payloadJson = json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[1])))) as Map<String, dynamic>;
+      final exp = payloadJson['exp'];
+      if (exp is int) {
+        final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+        if (exp < now) {
+          // expired -> try refresh once
+          try {
+            await ref.read(authProvider.notifier).refresh();
+          } catch (_) {}
+          final refreshed = ref.read(authProvider);
+          if (refreshed == null) {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+            return false;
+          }
+          token = refreshed.token.trim();
+          senderId = refreshed.uid;
+          if (token.isEmpty || senderId.isEmpty) {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+            return false;
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid token: $e')));
+      return false;
     }
 
     final uri = Uri.parse('http://127.0.0.1:8000/friend_requests');
@@ -244,8 +244,6 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
         'Content-Type': 'application/json',
         // Ensure exact formatting 'Bearer <token>' with no extra quoting
         'Authorization': 'Bearer $token',
-        'authorization': 'Bearer $token',
-        'auth-header': 'Bearer $token',
       };
 
       final resp = await http.post(uri, headers: headers, body: json.encode({'senderId': senderId, 'receiverId': receiverId}));
@@ -271,6 +269,7 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
     final query = q.trim();
     if (query.isEmpty) {
       setState(() => _results = []);
+      _stopAllListeners();
       return;
     }
 
@@ -281,12 +280,85 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
         final data = json.decode(resp.body);
         if (data is List) {
           setState(() => _results = List<Map<String, dynamic>>.from(data));
+          _startListenersForResults();
           return;
         }
       }
       setState(() => _results = []);
+      _stopAllListeners();
     } catch (_) {
       setState(() => _results = []);
+      _stopAllListeners();
     }
+  }
+
+  void _startListenersForResults() {
+    final user = ref.read(authProvider);
+    final myUid = user?.uid;
+
+    // If not authenticated, ensure no listeners
+    if (myUid == null) {
+      _stopAllListeners();
+      return;
+    }
+
+    final seen = <String>{};
+    for (final item in _results) {
+      final targetId = item['userId']?.toString() ?? '';
+      if (targetId.isEmpty) continue;
+      seen.add(targetId);
+      // Only listen for friend requests where current user is the sender
+      if (_friendSubs.containsKey(targetId)) continue;
+
+      final q = FirebaseFirestore.instance
+          .collection('friend_requests')
+          .where('senderId', isEqualTo: myUid)
+          .where('receiverId', isEqualTo: targetId)
+          .limit(1)
+          .snapshots();
+
+      final sub = q.listen((snap) {
+        if (snap.docs.isEmpty) {
+          // No request doc -> show Add
+          setState(() => _friendStatus[targetId] = 'add');
+        } else {
+          final data = snap.docs.first.data();
+          final status = (data['status'] as String?) ?? 'pending';
+          setState(() {
+            if (status == 'pending') {
+              _friendStatus[targetId] = 'sent';
+            } else if (status == 'accepted') {
+              _friendStatus[targetId] = 'friends';
+            } else {
+              _friendStatus[targetId] = 'add';
+            }
+          });
+        }
+      }, onError: (e) {
+        // On listener error, clear local state for that id
+        setState(() => _friendStatus[targetId] = 'add');
+      });
+
+      _friendSubs[targetId] = sub;
+    }
+
+    // Remove listeners for results that are no longer visible
+    final toRemove = _friendSubs.keys.where((k) => !seen.contains(k)).toList();
+    for (final k in toRemove) {
+      try {
+        _friendSubs[k]?.cancel();
+      } catch (_) {}
+      _friendSubs.remove(k);
+      setState(() => _friendStatus.remove(k));
+    }
+  }
+
+  void _stopAllListeners() {
+    for (final sub in _friendSubs.values) {
+      try {
+        sub.cancel();
+      } catch (_) {}
+    }
+    _friendSubs.clear();
   }
 }

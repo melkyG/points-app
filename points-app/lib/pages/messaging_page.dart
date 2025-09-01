@@ -1,45 +1,80 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/navigation_provider.dart';
 import 'friend_search_page.dart';
 import 'friend_requests_page.dart';
 
-class MessagingPage extends StatelessWidget {
+class MessagingPage extends ConsumerStatefulWidget {
   const MessagingPage({super.key});
 
   @override
+  ConsumerState<MessagingPage> createState() => _MessagingPageState();
+}
+
+class _MessagingPageState extends ConsumerState<MessagingPage> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        // update provider when tab settles
+        ref.read(messagingTabIndexProvider.notifier).state = _tabController.index;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          Material(
-            color: Theme.of(context).scaffoldBackgroundColor,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TabBar(
-                      labelColor: Theme.of(context).colorScheme.primary,
-                      unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-                      tabs: const [Tab(text: 'Friends'), Tab(text: 'Chats')],
-                    ),
-                  ),
-                  // Header no longer contains action icons; icons will appear inside the Friends tab body.
-                ],
-              ),
-            ),
-          ),
-          const Expanded(
-            child: TabBarView(
+    // Keep TabController in sync with provider changes. Using ref.listen inside
+    // build is allowed for ConsumerState and registers a lifecycle-tied listener.
+    ref.listen<int>(messagingTabIndexProvider, (prev, next) {
+      if (!_tabController.indexIsChanging && _tabController.index != next) {
+        _tabController.animateTo(next);
+      }
+    });
+    return Column(
+      children: [
+        Material(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Row(
               children: [
-                FriendsTab(),
-                Center(child: Text('Chats tab', style: TextStyle(fontSize: 18))),
+                Expanded(
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: Theme.of(context).colorScheme.primary,
+                    unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
+                    tabs: const [
+                      Tab(icon: Icon(Icons.groups)),
+                      Tab(icon: Icon(Icons.message)),
+                    ],
+                  ),
+                ),
+                // Header icons live inside the tab bodies
               ],
             ),
           ),
-        ],
-      ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: const [
+              FriendsTab(),
+              Center(child: Text('Chats tab', style: TextStyle(fontSize: 18))),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

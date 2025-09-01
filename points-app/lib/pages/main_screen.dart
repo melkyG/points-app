@@ -11,26 +11,67 @@ class MainScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedIndex = ref.watch(selectedIndexProvider);
+    final messagingTab = ref.watch(messagingTabIndexProvider);
+    String title;
+    if (selectedIndex == 1) {
+      title = 'Maps';
+    } else {
+      title = messagingTab == 0 ? 'Friends' : 'Chats';
+    }
 
     // Simple mapping of tab index to page widgets.
     final pages = const [MessagingPage(), MapsPage()];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Points - Main'),
+        automaticallyImplyLeading: false,
+        // Slightly reduce the app bar height and font size for the dynamic title
+        toolbarHeight: 50,
+        title: Text(
+          title,
+          style: TextStyle(fontSize: 18),
+        ),
+        centerTitle: true,
       ),
       drawer: const AppDrawer(), // Drawer slides over the content by default.
       body: IndexedStack(
         index: selectedIndex,
         children: pages,
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: selectedIndex,
-        onTap: (i) => ref.read(selectedIndexProvider.notifier).state = i,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messaging'),
-          BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Maps'),
-        ],
+      bottomNavigationBar: SafeArea(
+        child: Row(
+          children: [
+            // Drawer button on bottom-left
+            Builder(builder: (ctx) {
+              // Slightly increase the width of the drawer button so it's easier to tap
+              return SizedBox(
+                width: 64,
+                child: IconButton(
+                  tooltip: 'Open menu',
+                  icon: const Icon(Icons.menu),
+                  onPressed: () => Scaffold.of(ctx).openDrawer(),
+                ),
+              );
+            }),
+            // Expand the BottomNavigationBar to occupy remaining space
+            Expanded(
+              child: BottomNavigationBar(
+                currentIndex: selectedIndex,
+                onTap: (i) {
+                  ref.read(selectedIndexProvider.notifier).state = i;
+                  if (i == 0) {
+                    // whenever we navigate into Messaging, default to Chats (index 1)
+                    ref.read(messagingTabIndexProvider.notifier).state = 1;
+                  }
+                },
+                items: const [
+                  BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messaging'),
+                  BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Maps'),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

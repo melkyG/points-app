@@ -466,14 +466,51 @@ async def create_friend_request(req: FriendRequestCreate, token_payload: dict = 
         if pending_docs:
             raise HTTPException(status_code=409, detail='A pending friend request already exists')
 
-        # Create friend request
+        # Read sender and receiver profiles to denormalize display names and emails
+        sender_profile = None
+        receiver_profile = None
+        try:
+            sender_doc = _firestore_client.collection('users').document(sender).get()
+            if sender_doc.exists:
+                sender_profile = sender_doc.to_dict()
+        except Exception:
+            logger.debug('Failed to read sender profile for %s', sender, exc_info=True)
+
+        try:
+            receiver_doc = _firestore_client.collection('users').document(receiver).get()
+            if receiver_doc.exists:
+                receiver_profile = receiver_doc.to_dict()
+        except Exception:
+            logger.debug('Failed to read receiver profile for %s', receiver, exc_info=True)
+
+        def _extract_name_and_email(profile):
+            if not profile:
+                return (None, None)
+            name = profile.get('accountName') or profile.get('displayName') or profile.get('name') or profile.get('email')
+            email = profile.get('email')
+            return (name, email)
+
+        sender_name, sender_email = _extract_name_and_email(sender_profile)
+        receiver_name, receiver_email = _extract_name_and_email(receiver_profile)
+
+        # Create friend request with denormalized sender/receiver metadata
         doc_ref = users_ref.document()
-        doc_ref.set({
+        payload = {
             'senderId': sender,
             'receiverId': receiver,
             'status': 'pending',
             'createdAt': firestore.SERVER_TIMESTAMP,
-        })
+        }
+        if sender_name:
+            payload['senderDisplayName'] = sender_name
+        if sender_email:
+            payload['senderEmail'] = sender_email
+        if receiver_name:
+            payload['receiverDisplayName'] = receiver_name
+        if receiver_email:
+            payload['receiverEmail'] = receiver_email
+
+        doc_ref.set(payload)
 
         return JSONResponse(status_code=201, content={'message': 'Friend request created', 'requestId': doc_ref.id})
 

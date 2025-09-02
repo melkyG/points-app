@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/navigation_provider.dart';
+import '../providers/auth_provider.dart';
 import 'friend_search_page.dart';
 import 'friend_requests_page.dart';
 
@@ -87,12 +91,68 @@ class FriendsTab extends ConsumerStatefulWidget {
 }
 
 class _FriendsTabState extends ConsumerState<FriendsTab> {
-  // For now show a placeholder friends list. This can be replaced
-  // by a Firestore-backed friends query later.
   final List<Map<String, String>> _friends = [];
+
+  final FirebaseFirestore _fs = FirebaseFirestore.instance;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subSender;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subReceiver;
+  // temp storage keyed by friend_request doc id; we'll merge/dedupe by friendId
+  final Map<String, Map<String, String>> _tempByRequest = {};
+
+  void _rebuildFriends() {
+    final Map<String, Map<String, String>> byFriendId = {};
+    for (final entry in _tempByRequest.values) {
+      final friendId = entry['friendId'];
+      if (friendId == null) continue;
+      // dedupe by friendId (keep last written)
+      byFriendId[friendId] = {'name': entry['name'] ?? '<no-name>', 'email': entry['email'] ?? ''};
+    }
+    setState(() {
+      _friends
+        ..clear()
+        ..addAll(byFriendId.values.map((e) => {'name': e['name']!, 'email': e['email']!}));
+    });
+  }
+
+  void _startListeners() {
+    final uid = ref.read(authProvider)?.uid;
+    _subSender?.cancel();
+    _subReceiver?.cancel();
+    if (uid == null) return;
+
+    final qSender = _fs.collection('friend_requests').where('senderId', isEqualTo: uid).where('status', isEqualTo: 'accepted');
+    final qReceiver = _fs.collection('friend_requests').where('receiverId', isEqualTo: uid).where('status', isEqualTo: 'accepted');
+
+    _subSender = qSender.snapshots().listen((snap) {
+      for (final d in snap.docs) {
+        final data = d.data();
+        final friendId = data['receiverId'] as String?;
+        final name = (data['receiverDisplayName'] as String?) ?? (data['receiverEmail'] as String?) ?? 'Unknown';
+        final email = (data['receiverEmail'] as String?) ?? '';
+        _tempByRequest[d.id] = {'friendId': friendId ?? '', 'name': name, 'email': email};
+      }
+      _rebuildFriends();
+    });
+
+    _subReceiver = qReceiver.snapshots().listen((snap) {
+      for (final d in snap.docs) {
+        final data = d.data();
+        final friendId = data['senderId'] as String?;
+        final name = (data['senderDisplayName'] as String?) ?? (data['senderEmail'] as String?) ?? 'Unknown';
+        final email = (data['senderEmail'] as String?) ?? '';
+        _tempByRequest[d.id] = {'friendId': friendId ?? '', 'name': name, 'email': email};
+      }
+      _rebuildFriends();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Ensure listeners are active when widget is built and auth state available
+    // (didChangeDependencies also starts listeners; this is safe to call idempotently)
+    if (_subSender == null && _subReceiver == null) {
+      _startListeners();
+    }
     return Column(
       children: [
         // Action icons row (only visible inside Friends tab body)

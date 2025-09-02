@@ -24,16 +24,23 @@ class MainScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: false,
+        // Place a custom leading drawer button but keep the title centered
+        leading: Builder(builder: (ctx) {
+          return IconButton(
+            tooltip: 'Open menu',
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          );
+        }),
         // Slightly reduce the app bar height and font size for the dynamic title
         toolbarHeight: 50,
         title: Text(
           title,
-          style: TextStyle(fontSize: 18),
+          style: const TextStyle(fontSize: 18),
         ),
         centerTitle: true,
       ),
-      drawer: const AppDrawer(), // Drawer slides over the content by default.
+      drawer: const AppDrawer(),
       body: IndexedStack(
         index: selectedIndex,
         children: pages,
@@ -41,18 +48,6 @@ class MainScreen extends ConsumerWidget {
       bottomNavigationBar: SafeArea(
         child: Row(
           children: [
-            // Drawer button on bottom-left
-            Builder(builder: (ctx) {
-              // Slightly increase the width of the drawer button so it's easier to tap
-              return SizedBox(
-                width: 64,
-                child: IconButton(
-                  tooltip: 'Open menu',
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                ),
-              );
-            }),
             // Expand the BottomNavigationBar to occupy remaining space
             Expanded(
               child: BottomNavigationBar(

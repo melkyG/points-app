@@ -242,7 +242,12 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
       if (resp.statusCode == 200) {
         final data = json.decode(resp.body);
         if (data is List) {
-          setState(() => _results = List<Map<String, dynamic>>.from(data));
+          // Filter out the current user from results so the signed-in account isn't shown
+          final user = ref.read(authProvider);
+          final myUid = user?.uid;
+          final raw = List<Map<String, dynamic>>.from(data);
+          final filtered = myUid == null ? raw : raw.where((e) => (e['userId']?.toString() ?? '') != myUid).toList();
+          setState(() => _results = filtered);
           _startListenersForResults();
           return;
         }

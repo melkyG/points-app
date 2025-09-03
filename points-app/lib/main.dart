@@ -6,6 +6,7 @@ import 'pages/login_page.dart';
 import 'pages/register_page.dart';
 import 'pages/main_screen.dart';
 import 'providers/auth_provider.dart';
+import 'utils/navigation.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +31,7 @@ class PointsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'Points App',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const AuthGate(),

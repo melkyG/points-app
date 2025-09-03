@@ -5,8 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/navigation_provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/chat_service.dart';
 import 'friend_search_page.dart';
 import 'friend_requests_page.dart';
+import 'chats_list_page.dart';
+import 'chat_screen.dart';
+import '../utils/navigation.dart';
 
 class MessagingPage extends ConsumerStatefulWidget {
   const MessagingPage({super.key});
@@ -72,9 +76,11 @@ class _MessagingPageState extends ConsumerState<MessagingPage> with SingleTicker
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: const [
-              FriendsTab(),
-              Center(child: Text('Chats tab', style: TextStyle(fontSize: 18))),
+            children: [
+              const FriendsTab(),
+              // ChatsListPage shows real-time chats and will auto-open pending chat IDs
+              // when requested from FriendsTab.
+              const ChatsListPage(),
             ],
           ),
         ),
@@ -110,7 +116,7 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
     setState(() {
       _friends
         ..clear()
-        ..addAll(byFriendId.values.map((e) => {'name': e['name']!, 'email': e['email']!}));
+        ..addAll(byFriendId.entries.map((entry) => {'friendId': entry.key, 'name': entry.value['name']!, 'email': entry.value['email']!}));
     });
   }
 
@@ -190,6 +196,31 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
                     return ListTile(
                       title: Text(f['name'] ?? '<no-name>'),
                       subtitle: Text(f['email'] ?? ''),
+                      trailing: IconButton(
+                        tooltip: 'Chat',
+                        icon: const Icon(Icons.chat),
+                        onPressed: () async {
+                          final friendId = f['friendId'];
+                          final myUid = ref.read(authProvider)?.uid ?? '';
+                          if (friendId == null || myUid.isEmpty) return;
+                          final svc = ChatService();
+                          try {
+                            final chatId = await svc.getOrCreateChatForUsers(myUid, friendId);
+                            if (!mounted) return;
+                            // switch bottom nav to Messaging (index 0) then switch inner tab to Chats (1)
+                            ref.read(selectedIndexProvider.notifier).state = 0;
+                            ref.read(messagingTabIndexProvider.notifier).state = 1;
+                            // Schedule the push for the next frame so the tab switch takes effect
+                            // and then push using the root navigator so back returns to the Chats tab.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              rootNavigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
+                            });
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to open chat: $e')));
+                          }
+                        },
+                      ),
                     );
                   },
                 ),

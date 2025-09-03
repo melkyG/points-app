@@ -167,7 +167,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: appBarTitleWidget),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            // Defer unfocus and navigation slightly so the browser finishes pointer handling.
+            Future.delayed(const Duration(milliseconds: 1), () {
+              FocusScope.of(context).unfocus();
+              Navigator.of(context).maybePop();
+            });
+          },
+        ),
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Future.delayed(const Duration(milliseconds: 1), () => FocusScope.of(context).unfocus()),
+          child: appBarTitleWidget,
+        ),
+        flexibleSpace: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Future.delayed(const Duration(milliseconds: 1), () => FocusScope.of(context).unfocus()),
+        ),
+      ),
       body: Column(
         children: [
           Expanded(

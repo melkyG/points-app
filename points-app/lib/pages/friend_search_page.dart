@@ -19,14 +19,19 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
   Timer? _debounce;
   List<Map<String, dynamic>> _results = [];
   final Map<String, String> _friendStatus = {};
-  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _friendSubs = {};
+  final Map<String, List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?>> _friendSubs = {};
+  // track latest status from queries in both directions
+  final Map<String, String?> _friendStatusA = {}; // sender==me -> status
+  final Map<String, String?> _friendStatusB = {}; // sender==target -> status
 
   @override
   void dispose() {
-    for (final sub in _friendSubs.values) {
-      try {
-        sub.cancel();
-      } catch (_) {}
+    for (final subs in _friendSubs.values) {
+      for (final sub in subs) {
+        try {
+          sub?.cancel();
+        } catch (_) {}
+      }
     }
     _friendSubs.clear();
     _debounce?.cancel();
@@ -40,9 +45,23 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            // Defer unfocus and navigation slightly so the browser finishes pointer handling.
+            Future.delayed(const Duration(milliseconds: 1), () {
+              FocusScope.of(context).unfocus();
+              Navigator.of(context).maybePop();
+            });
+          },
         ),
-        title: const Text('Search Friends'),
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: const Text('Search for Users'),
+        ),
+        flexibleSpace: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Future.delayed(const Duration(milliseconds: 1), () => FocusScope.of(context).unfocus()),
+        ),
       ),
       body: Column(
         children: [
@@ -276,51 +295,94 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
       seen.add(targetId);
       if (_friendSubs.containsKey(targetId)) continue;
 
-      final q = FirebaseFirestore.instance
+      // Query A: current user -> target (to detect sent/pending/accepted)
+      final qA = FirebaseFirestore.instance
           .collection('friend_requests')
           .where('senderId', isEqualTo: myUid)
           .where('receiverId', isEqualTo: targetId)
+          .where('status', whereIn: ['pending', 'accepted'])
           .limit(1)
           .snapshots();
 
-      final sub = q.listen((snap) {
+      // Query B: target -> current user (to detect accepted from other side)
+      final qB = FirebaseFirestore.instance
+          .collection('friend_requests')
+          .where('senderId', isEqualTo: targetId)
+          .where('receiverId', isEqualTo: myUid)
+          .where('status', whereIn: ['pending', 'accepted'])
+          .limit(1)
+          .snapshots();
+
+      StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? subA;
+      StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? subB;
+
+      void recompute() {
+        final sa = _friendStatusA[targetId];
+        final sb = _friendStatusB[targetId];
+        if (sa == 'accepted' || sb == 'accepted') {
+          setState(() => _friendStatus[targetId] = 'friends');
+          return;
+        }
+        if (sa == 'pending') {
+          setState(() => _friendStatus[targetId] = 'sent');
+          return;
+        }
+        // default
+        setState(() => _friendStatus[targetId] = 'add');
+      }
+
+      subA = qA.listen((snap) {
         if (snap.docs.isEmpty) {
-          setState(() => _friendStatus[targetId] = 'add');
+          _friendStatusA.remove(targetId);
         } else {
           final data = snap.docs.first.data();
-          final status = (data['status'] as String?) ?? 'pending';
-          setState(() {
-            if (status == 'pending') {
-              _friendStatus[targetId] = 'sent';
-            } else if (status == 'accepted') {
-              _friendStatus[targetId] = 'friends';
-            } else {
-              _friendStatus[targetId] = 'add';
-            }
-          });
+          _friendStatusA[targetId] = (data['status'] as String?) ?? 'pending';
         }
+        recompute();
       }, onError: (e) {
-        setState(() => _friendStatus[targetId] = 'add');
+        _friendStatusA.remove(targetId);
+        recompute();
       });
 
-      _friendSubs[targetId] = sub;
+      subB = qB.listen((snap) {
+        if (snap.docs.isEmpty) {
+          _friendStatusB.remove(targetId);
+        } else {
+          final data = snap.docs.first.data();
+          _friendStatusB[targetId] = (data['status'] as String?) ?? 'pending';
+        }
+        recompute();
+      }, onError: (e) {
+        _friendStatusB.remove(targetId);
+        recompute();
+      });
+
+      _friendSubs[targetId] = [subA, subB];
     }
 
     final toRemove = _friendSubs.keys.where((k) => !seen.contains(k)).toList();
     for (final k in toRemove) {
       try {
-        _friendSubs[k]?.cancel();
+        for (final s in _friendSubs[k] ?? []) {
+          try {
+            s?.cancel();
+          } catch (_) {}
+        }
       } catch (_) {}
       _friendSubs.remove(k);
+      _friendStatusA.remove(k);
+      _friendStatusB.remove(k);
       setState(() => _friendStatus.remove(k));
     }
   }
 
   void _stopAllListeners() {
-    for (final sub in _friendSubs.values) {
-      try {
-        sub.cancel();
-      } catch (_) {}
+    for (final subs in _friendSubs.values) {
+      for (final sub in subs) {
+        try {
+          sub?.cancel();
+        } catch (_) {}
+      }
     }
     _friendSubs.clear();
   }

@@ -71,7 +71,39 @@ class _FriendRequestsPageState extends ConsumerState<FriendRequestsPage> {
     // Update Firestore (fire-and-forget). If this fails, the listener will
     // bring the UI back into sync, and accepted state will be removed.
     try {
-      await _fs.collection('friend_requests').doc(id).update({'status': 'accepted'});
+      final docRef = _fs.collection('friend_requests').doc(id);
+
+      // Read the request doc to determine sender/receiver for duplicate cleanup
+      final doc = await docRef.get();
+      if (!doc.exists) {
+        // nothing to do
+        return;
+      }
+
+      final data = doc.data();
+      final senderId = data?['senderId'] as String?;
+      final receiverId = data?['receiverId'] as String?;
+
+      // Update this request to accepted
+      await docRef.update({'status': 'accepted'});
+
+      // If we have sender/receiver, find reverse-direction pending requests and delete them
+      if (senderId != null && receiverId != null) {
+        final q = await _fs
+            .collection('friend_requests')
+            .where('senderId', isEqualTo: receiverId)
+            .where('receiverId', isEqualTo: senderId)
+            .where('status', isEqualTo: 'pending')
+            .get();
+
+        if (q.docs.isNotEmpty) {
+          final batch = _fs.batch();
+          for (final d in q.docs) {
+            batch.delete(d.reference);
+          }
+          await batch.commit();
+        }
+      }
     } catch (_) {
       // ignore errors for now; snapshot listener will resolve actual state
     }

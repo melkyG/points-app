@@ -62,9 +62,48 @@ class _MessagingPageState extends ConsumerState<MessagingPage> with SingleTicker
                     controller: _tabController,
                     labelColor: Theme.of(context).colorScheme.primary,
                     unselectedLabelColor: Theme.of(context).textTheme.bodySmall?.color,
-                    tabs: const [
-                      Tab(icon: Icon(Icons.groups)),
-                      Tab(icon: Icon(Icons.message)),
+                    tabs: [
+                      // Friends tab with live count of unique friends
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: FirebaseFirestore.instance.collection('friend_requests').where('status', isEqualTo: 'accepted').snapshots(),
+                        builder: (context, snap) {
+                          int count = 0;
+                          if (snap.hasData) {
+                            final uid = ref.read(authProvider)?.uid;
+                            final Set<String> set = {};
+                            for (final d in snap.data!.docs) {
+                              final data = d.data();
+                              final sender = data['senderId'] as String?;
+                              final receiver = data['receiverId'] as String?;
+                              if (uid != null) {
+                                if (sender == uid && receiver != null) set.add(receiver);
+                                if (receiver == uid && sender != null) set.add(sender);
+                              }
+                            }
+                            count = set.length;
+                          }
+                          // Keep the groups icon visually centered by placing it in a
+                          // fixed-width box and positioning the count to the right.
+                          return Tab(
+                            child: SizedBox(
+                              width: 72,
+                              height: 36,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  const Center(child: Icon(Icons.groups)),
+                                  if (count > 0)
+                                    Positioned(
+                                      right: 4,
+                                      child: Text('(${count.toString()})', style: const TextStyle(fontSize: 12)),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const Tab(icon: Icon(Icons.message)),
                     ],
                   ),
                 ),
@@ -174,13 +213,45 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendSearchPage()));
                 },
               ),
-              IconButton(
-                tooltip: 'Friend requests',
-                icon: const Icon(Icons.person_add),
-                onPressed: () {
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendRequestsPage()));
-                },
-              ),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('friend_requests')
+                      .where('receiverId', isEqualTo: ref.read(authProvider)?.uid)
+                      .where('status', isEqualTo: 'pending')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    int pendingCount = 0;
+                    if (snapshot.hasData) {
+                      pendingCount = snapshot.data!.docs.length;
+                    }
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          tooltip: 'Friend requests',
+                          icon: const Icon(Icons.person_add),
+                          onPressed: () {
+                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendRequestsPage()));
+                          },
+                        ),
+                          if (pendingCount > 0) 
+                            Positioned( 
+                              right: 0.3, 
+                              top: -0.3, 
+                              child: IgnorePointer( 
+                                child: Container( 
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), 
+                                  decoration: BoxDecoration(color: const Color.fromARGB(255, 111, 54, 244), borderRadius: BorderRadius.circular(12)), 
+                                  constraints: const BoxConstraints(minWidth: 19, minHeight: 15), 
+                                  child: Text(pendingCount.toString(), style: const TextStyle(color: Colors.white, fontSize: 12), textAlign: TextAlign.center), 
+                                ), 
+                              ), 
+                            ) 
+                      ],
+                    );
+                  },
+                ),
+              
             ],
           ),
         ),

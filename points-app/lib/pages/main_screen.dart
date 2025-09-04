@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/navigation_provider.dart';
 import 'messaging_page.dart';
+import '../utils/navigation.dart';
 import 'maps_page.dart';
 import '../widgets/app_drawer.dart';
 
@@ -20,7 +21,17 @@ class MainScreen extends ConsumerWidget {
     }
 
     // Simple mapping of tab index to page widgets.
-    final pages = const [MessagingPage(), MapsPage()];
+    // Wrap MessagingPage in its own nested Navigator so it keeps an independent
+    // stack and pushes (ChatScreen) won't cover the app-level bottom nav.
+    final pages = [
+      Navigator(
+        key: messagingNavigatorKey,
+        onGenerateRoute: (settings) {
+          return MaterialPageRoute(builder: (_) => const MessagingPage());
+        },
+      ),
+      const MapsPage(),
+    ];
 
     return Scaffold(
       appBar: AppBar(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import 'chat_screen.dart';
+import '../utils/navigation.dart';
 
 class ChatsListPage extends ConsumerStatefulWidget {
   const ChatsListPage({super.key});
@@ -171,7 +172,13 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                       title: Text(titleText),
                       subtitle: subtitleText != null ? Text(subtitleText) : null,
                       onTap: () {
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: id)));
+                        final nav = messagingNavigatorKey.currentState;
+                        if (nav != null) {
+                          nav.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: id)));
+                        } else {
+                          // Fallback to local context if nested navigator isn't ready
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: id)));
+                        }
                       },
                     );
                   },

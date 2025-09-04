@@ -284,7 +284,11 @@ class _FriendsTabState extends ConsumerState<FriendsTab> {
                             // Schedule the push for the next frame so the tab switch takes effect
                             // and then push using the root navigator so back returns to the Chats tab.
                             WidgetsBinding.instance.addPostFrameCallback((_) {
-                              rootNavigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
+                              // Prefer the messaging nested navigator so the bottom nav
+                              // remains visible. Fall back to the root navigator if
+                              // the messaging navigator isn't available for any reason.
+                              final nav = messagingNavigatorKey.currentState ?? rootNavigatorKey.currentState;
+                              nav?.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
                             });
                           } catch (e) {
                             if (!mounted) return;

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "238611365145",
+    "project_id": "points-app-xyz",
+    "storage_bucket": "points-app-xyz.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:238611365145:android:8a161811670a95ae8fd988",
+        "android_client_info": {
+          "package_name": "com.points.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdrAd7dmhbD3E0-SjW0ceoI0ADC87pSiM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -14,11 +14,17 @@ class User {
   final String token;
   final String? accountName;
 
-  User({required this.uid, required this.email, required this.token, this.accountName});
+  User(
+      {required this.uid,
+      required this.email,
+      required this.token,
+      this.accountName});
 
-  Map<String, dynamic> toJson() => {'uid': uid, 'email': email, 'token': token, 'accountName': accountName};
+  Map<String, dynamic> toJson() =>
+      {'uid': uid, 'email': email, 'token': token, 'accountName': accountName};
 
-  User copyWith({String? uid, String? email, String? token, String? accountName}) {
+  User copyWith(
+      {String? uid, String? email, String? token, String? accountName}) {
     return User(
       uid: uid ?? this.uid,
       email: email ?? this.email,
@@ -45,7 +51,8 @@ class AuthNotifier extends StateNotifier<User?> {
     if (token != null && email != null && uid != null) {
       // Validate token looks like our backend HS256 token before trusting it
       if (_isHs256Token(token)) {
-        state = User(uid: uid, email: email, token: token, accountName: account);
+        state =
+            User(uid: uid, email: email, token: token, accountName: account);
         _scheduleRefreshIfNeeded(token);
         // start listening to Firestore profile updates
         _startProfileListener(uid);
@@ -75,7 +82,7 @@ class AuthNotifier extends StateNotifier<User?> {
 
   /// Attempts login against the FastAPI backend. Throws an exception on failure.
   Future<void> login(String email, String password) async {
-    final url = Uri.parse('http://127.0.0.1:8000/login');
+    final url = Uri.parse('http://10.0.2.2:8000/login');
     final resp = await http.post(url,
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': email, 'password': password}));
@@ -99,12 +106,16 @@ class AuthNotifier extends StateNotifier<User?> {
 
       // Persist token and user info in secure storage.
       await _storage.write(key: 'jwt', value: token);
-      if (refresh != null) await _storage.write(key: 'refresh_token', value: refresh);
-      if (accountName != null) await _storage.write(key: 'accountName', value: accountName);
+      if (refresh != null)
+        await _storage.write(key: 'refresh_token', value: refresh);
+      if (accountName != null)
+        await _storage.write(key: 'accountName', value: accountName);
       await _storage.write(key: 'email', value: userEmail);
       await _storage.write(key: 'uid', value: uid);
-      state = User(uid: uid, email: userEmail, token: token, accountName: accountName);
-  developer.log('AuthNotifier: login succeeded, token length=${token.length}, HS256=${_isHs256Token(token)}');
+      state = User(
+          uid: uid, email: userEmail, token: token, accountName: accountName);
+      developer.log(
+          'AuthNotifier: login succeeded, token length=${token.length}, HS256=${_isHs256Token(token)}');
       _scheduleRefreshIfNeeded(token);
       // If accountName wasn't returned, fetch it async from backend
       if (accountName == null) {
@@ -122,20 +133,26 @@ class AuthNotifier extends StateNotifier<User?> {
 
   /// Register a new user via backend /register. On success this does not
   /// log the user in; caller should navigate to LoginPage.
-  Future<void> register(String email, String password, String accountName) async {
-    final url = Uri.parse('http://127.0.0.1:8000/register');
+  Future<void> register(
+      String email, String password, String accountName) async {
+    final url = Uri.parse('http://10.0.2.2:8000/register');
     final resp = await http.post(url,
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'email': email, 'password': password, 'accountName': accountName}));
+        body: json.encode({
+          'email': email,
+          'password': password,
+          'accountName': accountName
+        }));
 
-  if (resp.statusCode == 200 || resp.statusCode == 201) {
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
       // Registration succeeded. Backend may return details in body.
       return;
     } else {
       String msg = 'Registration failed: HTTP ${resp.statusCode}';
       try {
         final body = json.decode(resp.body);
-        if (body is Map && body['detail'] != null) msg = 'Registration failed: ${body['detail']}';
+        if (body is Map && body['detail'] != null)
+          msg = 'Registration failed: ${body['detail']}';
       } catch (_) {}
       throw Exception(msg);
     }
@@ -197,30 +214,33 @@ class AuthNotifier extends StateNotifier<User?> {
 
       if (resp.statusCode == 200) {
         final data = json.decode(resp.body) as Map<String, dynamic>;
-  final newToken = data['access_token'] as String?;
-  final uid = data['uid'] as String?;
-  final email = data['email'] as String?;
-  final accountName = data['accountName'] as String?;
+        final newToken = data['access_token'] as String?;
+        final uid = data['uid'] as String?;
+        final email = data['email'] as String?;
+        final accountName = data['accountName'] as String?;
         if (newToken == null || uid == null || email == null) {
           throw Exception('Invalid refresh response');
         }
 
-          // Ensure the refresh response contains backend HS256 token
-          if (!_isHs256Token(newToken)) {
-            throw Exception('Refresh returned invalid token type');
-          }
+        // Ensure the refresh response contains backend HS256 token
+        if (!_isHs256Token(newToken)) {
+          throw Exception('Refresh returned invalid token type');
+        }
 
-          await _storage.write(key: 'jwt', value: newToken);
-          developer.log('AuthNotifier: refresh succeeded, token length=${newToken.length}, HS256=${_isHs256Token(newToken)}');
-        if (accountName != null) await _storage.write(key: 'accountName', value: accountName);
-        state = User(uid: uid, email: email, token: newToken, accountName: accountName);
+        await _storage.write(key: 'jwt', value: newToken);
+        developer.log(
+            'AuthNotifier: refresh succeeded, token length=${newToken.length}, HS256=${_isHs256Token(newToken)}');
+        if (accountName != null)
+          await _storage.write(key: 'accountName', value: accountName);
+        state = User(
+            uid: uid, email: email, token: newToken, accountName: accountName);
         _scheduleRefreshIfNeeded(newToken);
         // If profile not present, fetch it async
         if (accountName == null) {
           _fetchProfileIfNeeded(uid);
         }
-  // ensure realtime listener running
-  _startProfileListener(uid);
+        // ensure realtime listener running
+        _startProfileListener(uid);
       } else {
         // Refresh failed - logout
         await logout();
@@ -249,11 +269,11 @@ class AuthNotifier extends StateNotifier<User?> {
     await _storage.delete(key: 'refresh_token');
     await _storage.delete(key: 'email');
     await _storage.delete(key: 'uid');
-  await _storage.delete(key: 'accountName');
+    await _storage.delete(key: 'accountName');
     state = null;
-  // cancel profile listener
-  await _profileSub?.cancel();
-  _profileSub = null;
+    // cancel profile listener
+    await _profileSub?.cancel();
+    _profileSub = null;
   }
 
   /// Fetch user profile from backend /users/{uid} if not already fetching.
@@ -270,7 +290,11 @@ class AuthNotifier extends StateNotifier<User?> {
           await _storage.write(key: 'accountName', value: accountName);
           // Update state if still same user
           if (state != null && state!.uid == uid) {
-            state = User(uid: state!.uid, email: state!.email, token: state!.token, accountName: accountName);
+            state = User(
+                uid: state!.uid,
+                email: state!.email,
+                token: state!.token,
+                accountName: accountName);
           }
         }
       } else {
@@ -292,11 +316,13 @@ class AuthNotifier extends StateNotifier<User?> {
     try {
       // Ensure Firebase is initialized before subscribing.
       if (Firebase.apps.isEmpty) {
-        developer.log('AuthNotifier: Firebase not initialized, awaiting Firebase.initializeApp()');
+        developer.log(
+            'AuthNotifier: Firebase not initialized, awaiting Firebase.initializeApp()');
         try {
           await Firebase.initializeApp();
         } catch (e) {
-          developer.log('AuthNotifier: Firebase.initializeApp() error (may already be initialized): $e');
+          developer.log(
+              'AuthNotifier: Firebase.initializeApp() error (may already be initialized): $e');
         }
       }
 
@@ -325,7 +351,8 @@ class AuthNotifier extends StateNotifier<User?> {
       });
       developer.log('AuthNotifier: profile listener subscribed for uid=$uid');
     } catch (e) {
-      developer.log('AuthNotifier: failed to start profile listener for uid=$uid: $e');
+      developer.log(
+          'AuthNotifier: failed to start profile listener for uid=$uid: $e');
     }
   }
 
@@ -336,4 +363,5 @@ class AuthNotifier extends StateNotifier<User?> {
   }
 }
 
-final authProvider = StateNotifierProvider<AuthNotifier, User?>((ref) => AuthNotifier());
+final authProvider =
+    StateNotifierProvider<AuthNotifier, User?>((ref) => AuthNotifier());

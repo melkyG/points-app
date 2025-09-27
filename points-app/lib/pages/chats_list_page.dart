@@ -190,7 +190,9 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
       final doc = await _fs.collection('users').doc(uid).get();
       if (doc.exists) {
         final data = doc.data();
-        final name = (data != null && data['accountName'] != null) ? data['accountName'].toString() : null;
+        final name = (data != null && data['accountName'] != null)
+            ? data['accountName'].toString()
+            : null;
         _nameCache[uid] = name;
       } else {
         _nameCache[uid] = null;
@@ -218,7 +220,9 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                     final id = c['id'] as String;
                     final parts = (c['participants'] as List).cast<String>();
                     final uid = ref.read(authProvider)?.uid;
-                    final other = parts.firstWhere((p) => p != uid, orElse: () => parts.isNotEmpty ? parts.first : uid ?? '');
+                    final other = parts.firstWhere((p) => p != uid,
+                        orElse: () =>
+                            parts.isNotEmpty ? parts.first : uid ?? '');
 
                     // Title: friend's display name (or 'You' if it's the current user)
                     String titleText;
@@ -235,7 +239,9 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                     // Subtitle: last message if present
                     String? subtitleText;
                     final last = _lastMessages[id];
-                    if (last != null && last.containsKey('text') && last.containsKey('senderId')) {
+                    if (last != null &&
+                        last.containsKey('text') &&
+                        last.containsKey('senderId')) {
                       final text = (last['text'] ?? '').toString();
                       final senderId = (last['senderId'] ?? '').toString();
                       if (senderId == uid) {

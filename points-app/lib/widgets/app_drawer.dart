@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
- 
+import '../pages/account_page.dart'; // added import
+import '../pages/settings_page.dart';
 
 class AppDrawer extends ConsumerStatefulWidget {
-  const AppDrawer({super.key});
+  final GlobalKey<ScaffoldState>? scaffoldKey;
+  const AppDrawer({super.key, this.scaffoldKey});
 
   @override
   ConsumerState<AppDrawer> createState() => _AppDrawerState();
@@ -13,9 +15,9 @@ class AppDrawer extends ConsumerStatefulWidget {
 class _AppDrawerState extends ConsumerState<AppDrawer> {
   @override
   Widget build(BuildContext context) {
-  // Debug: print the cached accountName from the provider to verify updates
-  print(ref.watch(authProvider)?.accountName);
-  final user = ref.watch(authProvider);
+    // Debug: print the cached accountName from the provider to verify updates
+    print(ref.watch(authProvider)?.accountName);
+    final user = ref.watch(authProvider);
     final email = user?.email ?? '';
     final accountName = user?.accountName;
 
@@ -30,22 +32,34 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                   children: [
                     UserAccountsDrawerHeader(
                       accountName: accountName == null
-                          ? const SizedBox(width: 120, height: 16, child: LinearProgressIndicator())
+                          ? const SizedBox(
+                              width: 120,
+                              height: 16,
+                              child: LinearProgressIndicator())
                           : Text(accountName),
-                      accountEmail: Text(email.isNotEmpty ? email : 'email@example.com'),
+                      accountEmail:
+                          Text(email.isNotEmpty ? email : 'email@example.com'),
                     ),
                     ListTile(
                       leading: const Icon(Icons.person),
                       title: const Text('Account'),
                       onTap: () {
-                        Navigator.pop(context);
+                        Navigator.of(context).pop();
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) =>
+                              AccountPage(scaffoldKey: widget.scaffoldKey),
+                        ));
                       },
                     ),
                     ListTile(
                       leading: const Icon(Icons.settings),
                       title: const Text('Settings'),
                       onTap: () {
-                        Navigator.pop(context);
+                        Navigator.of(context).pop();
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) =>
+                              SettingsPage(scaffoldKey: widget.scaffoldKey),
+                        ));
                       },
                     ),
                   ],
@@ -80,8 +94,11 @@ class _AppDrawerState extends ConsumerState<AppDrawer> {
                               TextButton(
                                 onPressed: () async {
                                   Navigator.of(dialogCtx).pop();
-                                  await ref.read(authProvider.notifier).logout();
-                                  Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+                                  await ref
+                                      .read(authProvider.notifier)
+                                      .logout();
+                                  Navigator.pushNamedAndRemoveUntil(
+                                      context, '/login', (r) => false);
                                 },
                                 child: const Text('Yes'),
                               ),

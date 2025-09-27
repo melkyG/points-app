@@ -3,9 +3,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart'; // <-- added for kIsWeb
 import '../providers/auth_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Single editable host selection used for local backend calls.
+// Defaults: web -> 127.0.0.1, non-web (emulator) -> 10.0.2.2
+const String _localHostForWeb = '127.0.0.1';
+const String _localHostForEmulator = '10.0.2.2';
+// If you want to force a specific host, set `localHost` to one of the constants below.
+// Otherwise the value is chosen automatically based on kIsWeb.
+final String localHost = kIsWeb ? _localHostForWeb : _localHostForEmulator;
 
 class FriendSearchPage extends ConsumerStatefulWidget {
   const FriendSearchPage({super.key});
@@ -19,7 +28,9 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
   Timer? _debounce;
   List<Map<String, dynamic>> _results = [];
   final Map<String, String> _friendStatus = {};
-  final Map<String, List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?>> _friendSubs = {};
+  final Map<String,
+          List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?>>
+      _friendSubs = {};
   // track latest status from queries in both directions
   final Map<String, String?> _friendStatusA = {}; // sender==me -> status
   final Map<String, String?> _friendStatusB = {}; // sender==target -> status
@@ -60,7 +71,8 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
         ),
         flexibleSpace: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => Future.delayed(const Duration(milliseconds: 1), () => FocusScope.of(context).unfocus()),
+          onTap: () => Future.delayed(const Duration(milliseconds: 1),
+              () => FocusScope.of(context).unfocus()),
         ),
       ),
       body: Column(
@@ -78,7 +90,8 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
                     ),
                     onChanged: (v) {
                       _debounce?.cancel();
-                      _debounce = Timer(const Duration(milliseconds: 300), () => _performSearch(v));
+                      _debounce = Timer(const Duration(milliseconds: 300),
+                          () => _performSearch(v));
                     },
                   ),
                 ),
@@ -92,7 +105,10 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
           ),
           Expanded(
             child: _results.isEmpty
-                ? Center(child: Text(_searchController.text.isEmpty ? 'No results' : 'No matches'))
+                ? Center(
+                    child: Text(_searchController.text.isEmpty
+                        ? 'No results'
+                        : 'No matches'))
                 : ListView.builder(
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
@@ -121,7 +137,8 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
                         title: Text(account),
                         subtitle: Text(email),
                         trailing: ElevatedButton(
-                          onPressed: disabled ? null : () => _onAddPressed(userId),
+                          onPressed:
+                              disabled ? null : () => _onAddPressed(userId),
                           child: Text(buttonText),
                         ),
                       );
@@ -150,7 +167,9 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
   Future<bool> _sendFriendRequest(String receiverId) async {
     final current = ref.read(authProvider);
     if (current == null) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Not authenticated')));
       return false;
     }
 
@@ -163,7 +182,9 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
       } catch (_) {}
       final refreshed = ref.read(authProvider);
       if (refreshed == null) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+        if (mounted)
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Not authenticated')));
         return false;
       }
       token = refreshed.token.trim();
@@ -171,13 +192,17 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
     }
 
     if (token.isEmpty || senderId.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Not authenticated')));
       return false;
     }
 
     final parts = token.split('.');
     if (parts.length != 3) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid token format')));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid token format')));
       return false;
     }
 
@@ -188,14 +213,20 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
     }
 
     try {
-      final headerJson = json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[0])))) as Map<String, dynamic>;
+      final headerJson =
+          json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[0]))))
+              as Map<String, dynamic>;
       final alg = headerJson['alg'] as String?;
       if (alg != 'HS256') {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Token algorithm not supported')));
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Token algorithm not supported')));
         return false;
       }
 
-      final payloadJson = json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[1])))) as Map<String, dynamic>;
+      final payloadJson =
+          json.decode(utf8.decode(base64Url.decode(_normalizeBase64(parts[1]))))
+              as Map<String, dynamic>;
       final exp = payloadJson['exp'];
       if (exp is int) {
         final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -205,30 +236,39 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
           } catch (_) {}
           final refreshed = ref.read(authProvider);
           if (refreshed == null) {
-            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+            if (mounted)
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Not authenticated')));
             return false;
           }
           token = refreshed.token.trim();
           senderId = refreshed.uid;
           if (token.isEmpty || senderId.isEmpty) {
-            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not authenticated')));
+            if (mounted)
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Not authenticated')));
             return false;
           }
         }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid token: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Invalid token: $e')));
       return false;
     }
 
-    final uri = Uri.parse('http://127.0.0.1:8000/friend_requests');
+    //final uri = Uri.parse('http://127.0.0.1:8000/friend_requests');
+    final uri = Uri.parse('http://$localHost:8000/friend_requests');
     try {
       final headers = {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       };
 
-      final resp = await http.post(uri, headers: headers, body: json.encode({'senderId': senderId, 'receiverId': receiverId}));
+      final resp = await http.post(uri,
+          headers: headers,
+          body: json.encode({'senderId': senderId, 'receiverId': receiverId}));
 
       if (resp.statusCode == 201) {
         return true;
@@ -237,12 +277,17 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
       String msg = 'Failed to send request: HTTP ${resp.statusCode}';
       try {
         final body = json.decode(resp.body);
-        if (body is Map && body['detail'] != null) msg = body['detail'].toString();
+        if (body is Map && body['detail'] != null)
+          msg = body['detail'].toString();
       } catch (_) {}
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
       return false;
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Network error: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Network error: $e')));
       return false;
     }
   }
@@ -256,7 +301,9 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
     }
 
     try {
-      final uri = Uri.parse('http://127.0.0.1:8000/users/search').replace(queryParameters: {'query': query});
+      //final uri = Uri.parse('http://127.0.0.1:8000/users/search')
+      final uri = Uri.parse('http://$localHost:8000/users/search')
+          .replace(queryParameters: {'query': query});
       final resp = await http.get(uri);
       if (resp.statusCode == 200) {
         final data = json.decode(resp.body);
@@ -265,7 +312,11 @@ class _FriendSearchPageState extends ConsumerState<FriendSearchPage> {
           final user = ref.read(authProvider);
           final myUid = user?.uid;
           final raw = List<Map<String, dynamic>>.from(data);
-          final filtered = myUid == null ? raw : raw.where((e) => (e['userId']?.toString() ?? '') != myUid).toList();
+          final filtered = myUid == null
+              ? raw
+              : raw
+                  .where((e) => (e['userId']?.toString() ?? '') != myUid)
+                  .toList();
           setState(() => _results = filtered);
           _startListenersForResults();
           return;

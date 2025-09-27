@@ -7,6 +7,7 @@ import 'dart:developer' as developer;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'dart:async' show StreamSubscription;
+import 'package:flutter/foundation.dart'; // add this import
 
 class User {
   final String uid;
@@ -33,6 +34,12 @@ class User {
     );
   }
 }
+
+// Single editable host selection used for local backend calls.
+// Defaults: web -> 127.0.0.1, non-web (emulator) -> 10.0.2.2
+const String _localHostForWeb = '127.0.0.1';
+const String _localHostForEmulator = '10.0.2.2';
+final String localHost = kIsWeb ? _localHostForWeb : _localHostForEmulator;
 
 class AuthNotifier extends StateNotifier<User?> {
   final _storage = const FlutterSecureStorage();
@@ -82,7 +89,12 @@ class AuthNotifier extends StateNotifier<User?> {
 
   /// Attempts login against the FastAPI backend. Throws an exception on failure.
   Future<void> login(String email, String password) async {
-    final url = Uri.parse('http://10.0.2.2:8000/login');
+    return loginWithHost(email, password, localHost);
+  }
+
+  /// Attempts login against the FastAPI backend at the given host.
+  Future<void> loginWithHost(String email, String password, String host) async {
+    final url = Uri.parse('http://$host:8000/login');
     final resp = await http.post(url,
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': email, 'password': password}));
@@ -135,7 +147,7 @@ class AuthNotifier extends StateNotifier<User?> {
   /// log the user in; caller should navigate to LoginPage.
   Future<void> register(
       String email, String password, String accountName) async {
-    final url = Uri.parse('http://10.0.2.2:8000/register');
+    final url = Uri.parse('http://$localHost:8000/register');
     final resp = await http.post(url,
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
@@ -207,7 +219,7 @@ class AuthNotifier extends StateNotifier<User?> {
     }
 
     try {
-      final url = Uri.parse('http://127.0.0.1:8000/refresh');
+      final url = Uri.parse('http://$localHost:8000/refresh');
       final resp = await http.post(url,
           headers: {'Content-Type': 'application/json'},
           body: json.encode({'refresh_token': refreshToken}));
@@ -256,7 +268,7 @@ class AuthNotifier extends StateNotifier<User?> {
     final refreshToken = await _storage.read(key: 'refresh_token');
     if (refreshToken != null) {
       try {
-        final url = Uri.parse('http://127.0.0.1:8000/auth/logout');
+        final url = Uri.parse('http://$localHost:8000/auth/logout');
         await http.post(url,
             headers: {'Content-Type': 'application/json'},
             body: json.encode({'refresh_token': refreshToken}));
@@ -281,7 +293,7 @@ class AuthNotifier extends StateNotifier<User?> {
     if (_fetchingProfile) return;
     _fetchingProfile = true;
     try {
-      final uri = Uri.parse('http://127.0.0.1:8000/users/$uid');
+      final uri = Uri.parse('http://$localHost:8000/users/$uid');
       final resp = await http.get(uri);
       if (resp.statusCode == 200) {
         final data = json.decode(resp.body) as Map<String, dynamic>;

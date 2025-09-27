@@ -5,6 +5,7 @@ import 'messaging_page.dart';
 import '../utils/navigation.dart';
 import 'maps_page.dart';
 import '../widgets/app_drawer.dart';
+import '../pages/account_page.dart'; // add this import if not present
 
 class MainScreen extends ConsumerWidget {
   const MainScreen({super.key});
@@ -33,7 +34,11 @@ class MainScreen extends ConsumerWidget {
       const MapsPage(),
     ];
 
+    // Add a global key for the Scaffold
+    final scaffoldKey = GlobalKey<ScaffoldState>();
+
     return Scaffold(
+      key: scaffoldKey,
       appBar: AppBar(
         // Place a custom leading drawer button but keep the title centered
         leading: Builder(builder: (ctx) {
@@ -51,7 +56,7 @@ class MainScreen extends ConsumerWidget {
         ),
         centerTitle: true,
       ),
-      drawer: const AppDrawer(),
+      drawer: AppDrawer(scaffoldKey: scaffoldKey), // pass the key to the drawer
       body: IndexedStack(
         index: selectedIndex,
         children: pages,
@@ -71,7 +76,8 @@ class MainScreen extends ConsumerWidget {
                   }
                 },
                 items: const [
-                  BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messaging'),
+                  BottomNavigationBarItem(
+                      icon: Icon(Icons.message), label: 'Messaging'),
                   BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Maps'),
                 ],
               ),

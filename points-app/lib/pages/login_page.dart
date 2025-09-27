@@ -2,6 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
+import 'package:flutter/foundation.dart'; // <-- add this import
+
+// Single editable host selection used for local backend calls.
+// Defaults: web -> 127.0.0.1, non-web (emulator) -> 10.0.2.2
+const String _localHostForWeb = '127.0.0.1';
+const String _localHostForEmulator = '10.0.2.2';
+final String localHost = kIsWeb ? _localHostForWeb : _localHostForEmulator;
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -11,16 +18,18 @@ class LoginPage extends ConsumerStatefulWidget {
 }
 
 class _LoginPageState extends ConsumerState<LoginPage> {
-  final _emailController = TextEditingController(text: 'test@gmail.com');
-  final _passwordController = TextEditingController(text: 'testing');
+  final _emailController = TextEditingController(text: 'test12@gmail.com');
+  final _passwordController = TextEditingController(text: 'test12');
   bool _loading = false;
 
   Future<void> _attemptLogin() async {
     setState(() => _loading = true);
     try {
-      await ref.read(authProvider.notifier).login(
+      // Use localHost for backend URL
+      await ref.read(authProvider.notifier).loginWithHost(
             _emailController.text.trim(),
             _passwordController.text,
+            localHost,
           );
 
       // On success navigate to main screen.
@@ -28,7 +37,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     } catch (e) {
       final message = e is Exception ? e.toString() : 'Login failed';
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -69,7 +79,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _loading ? null : _attemptLogin,
-                  child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Login'),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Text('Login'),
                 ),
               ),
               const SizedBox(height: 16),

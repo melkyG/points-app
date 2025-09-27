@@ -36,14 +36,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
 
-    // Clear unread count for this chat when the screen is opened.
-    unreadCountsGlobal[widget.chatId] = 0;
-
     // Subscribe to messages to enable scroll-to-bottom when new messages arrive.
     _messageSub = _svc.getMessages(widget.chatId).listen((list) {
       setState(() {
         _messages = list;
       });
+
+      // Mark messages as read when we receive them (if not sent by me)
+      //_svc.updateMessageStatusToRead(widget.chatId);
+
       SchedulerBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       // prefetch sender names for remote senders
       for (final m in list) {
@@ -118,12 +119,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _send() async {
     final txt = _ctrl.text.trim();
+    String status = 'unread';
     if (txt.isEmpty) return;
     final uid = ref.read(authProvider)?.uid;
     if (uid == null) return;
     _ctrl.clear();
     try {
-      await _svc.sendMessage(widget.chatId, uid, txt);
+      await _svc.sendMessage(widget.chatId, uid, txt, status);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Send failed: $e')));
     }

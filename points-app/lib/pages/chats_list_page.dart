@@ -3,8 +3,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:points_app/services/chat_service.dart';
 import '../providers/auth_provider.dart';
-import 'chat_screen.dart'; // provides unreadCountsGlobal
+import 'chat_screen.dart';
 import '../utils/navigation.dart';
 
 class ChatsListPage extends ConsumerStatefulWidget {
@@ -25,7 +26,11 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
   final Map<String, Map<String, dynamic>> _lastMessages = {};
   // name cache uid -> accountName? (null == loading)
   final Map<String, String?> _nameCache = {};
-  // pending-related fields removed; kept simple
+
+  final ChatService _chatService = ChatService();
+
+  // New: local unread counts per chat (fetched from backend)
+  final Map<String, int> _unreadCounts = {};
 
   // Helper: extract epoch ms from various timestamp representations in Firestore docs
   int _extractMillis(dynamic ts) {
@@ -63,21 +68,26 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
       _chats.clear();
       for (final d in snap.docs) {
         final data = d.data();
-        _chats.add({'id': d.id, 'participants': data['participants'] as List? ?? [], 'createdAt': data['createdAt']});
+        _chats.add({
+          'id': d.id,
+          'participants': data['participants'] as List? ?? [],
+          'createdAt': data['createdAt']
+        });
       }
       setState(() {});
 
-  // ChatsListPage shows real-time chats; Pending-open handling moved to FriendsTab.
       // Ensure per-chat latest-message listeners are active for current chats
       final currentIds = _chats.map((c) => c['id'] as String).toSet();
       // cancel subs no longer needed
-      final toRemove = _msgSubs.keys.where((k) => !currentIds.contains(k)).toList();
+      final toRemove =
+          _msgSubs.keys.where((k) => !currentIds.contains(k)).toList();
       for (final k in toRemove) {
         try {
           _msgSubs[k]?.cancel();
         } catch (_) {}
         _msgSubs.remove(k);
         _lastMessages.remove(k);
+        _unreadCounts.remove(k);
       }
 
       // start listeners for new chats
@@ -95,35 +105,27 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
           if (ms.docs.isEmpty) {
             // remove last message if none present
             _lastMessages.remove(id);
-            if (mounted) {
-              _sortChatsByLatestMessage();
-              setState(() {});
-            }
+            // fetch unread count (should be zero but ensure consistent)
+            _chatService.getTotalUnreadMessages(id).then((cnt) {
+              _unreadCounts[id] = cnt;
+              if (mounted) {
+                _sortChatsByLatestMessage();
+                setState(() {});
+              }
+            }).catchError((_) {
+              if (mounted) {
+                _sortChatsByLatestMessage();
+                setState(() {});
+              }
+            });
           } else {
             final m = ms.docs.first.data();
-
-            // Detect whether this is a new incoming message (not the initial load)
-            final prev = _lastMessages[id];
-            final prevTs = prev != null ? _extractMillis(prev['timestamp']) : 0;
-            final newTs = _extractMillis(m['timestamp']);
-            final senderId = (m['senderId'] as String?) ?? '';
 
             // Update cache first
             _lastMessages[id] = m;
 
-            // Notify by incrementing unread count only if we had a previous value (so initial load doesn't notify),
-            // the new timestamp is greater than previous, and sender is not the current user.
-            final currentUid = ref.read(authProvider)?.uid;
-            final shouldMarkUnread = prev != null &&
-                newTs > prevTs &&
-                senderId.isNotEmpty &&
-                senderId != currentUid;
-
-            if (shouldMarkUnread) {
-              unreadCountsGlobal[id] = (unreadCountsGlobal[id] ?? 0) + 1;
-            }
-
             // Ensure we have name cache for sender and other participant
+            final senderId = (m['senderId'] as String?) ?? '';
             if (senderId.isNotEmpty && !_nameCache.containsKey(senderId))
               _fetchAndCacheName(senderId);
             final parts = c['participants'] as List;
@@ -133,16 +135,36 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                 _fetchAndCacheName(pid);
             }
 
-            if (mounted) {
-              _sortChatsByLatestMessage();
-              setState(() {});
-            }
+            // Fetch the authoritative unread count from backend for this chat
+            _chatService.getTotalUnreadMessages(id).then((cnt) {
+              _unreadCounts[id] = cnt;
+              if (mounted) {
+                _sortChatsByLatestMessage();
+                setState(() {});
+              }
+            }).catchError((_) {
+              if (mounted) {
+                _sortChatsByLatestMessage();
+                setState(() {});
+              }
+            });
           }
         });
         _msgSubs[id] = sub;
       }
 
       // After ensuring listeners are active, sort chats once (in case no per-chat listeners fired)
+      // Also trigger unread fetch for chats that don't yet have a cached value
+      for (final c in _chats) {
+        final id = c['id'] as String;
+        if (!_unreadCounts.containsKey(id)) {
+          _chatService.getTotalUnreadMessages(id).then((cnt) {
+            _unreadCounts[id] = cnt;
+            if (mounted) setState(() {});
+          }).catchError((_) {});
+        }
+      }
+
       if (mounted) {
         _sortChatsByLatestMessage();
         setState(() {});
@@ -232,8 +254,8 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                       subtitleText = null;
                     }
 
-                    // unread count for this chat (persisted globally)
-                    final unread = unreadCountsGlobal[id] ?? 0;
+                    // unread count for this chat (fetched from backend)
+                    final unread = _unreadCounts[id] ?? 0;
 
                     return ListTile(
                       // show name and unread badge next to it
@@ -243,14 +265,16 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                           if (unread > 0)
                             Container(
                               margin: const EdgeInsets.only(left: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                   color: Theme.of(context).colorScheme.primary,
                                   borderRadius: BorderRadius.circular(12)),
                               child: Text(
                                 unread.toString(),
                                 style: TextStyle(
-                                    color: Theme.of(context).colorScheme.onPrimary,
+                                    color:
+                                        Theme.of(context).colorScheme.onPrimary,
                                     fontSize: 12),
                               ),
                             ),
@@ -258,12 +282,11 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                       ),
                       subtitle:
                           subtitleText != null ? Text(subtitleText) : null,
-                      onTap: () {
-                        // clear unread count for this chat when user opens it
-                        if ((unreadCountsGlobal[id] ?? 0) > 0) {
-                          unreadCountsGlobal[id] = 0;
-                          setState(() {}); // reflect change in the list UI
-                        }
+                      onTap: () async {
+                        // mark messages as read in backend and clear local cached unread count
+                        await _chatService.updateMessageStatusToRead(id);
+                        _unreadCounts[id] = 0;
+                        if (mounted) setState(() {});
 
                         final nav = messagingNavigatorKey.currentState;
                         if (nav != null) {

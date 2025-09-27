@@ -2,11 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/message.dart';
 
 class ChatService {
-  ChatService({FirebaseFirestore? firestore}) : _fs = firestore ?? FirebaseFirestore.instance;
+  ChatService({FirebaseFirestore? firestore})
+      : _fs = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _fs;
 
-  CollectionReference<Map<String, dynamic>> get _chats => _fs.collection('chats');
+  CollectionReference<Map<String, dynamic>> get _chats =>
+      _fs.collection('chats');
 
   /// Creates a chat document with the provided participant IDs.
   /// Returns the created chat's document id.
@@ -46,18 +48,41 @@ class ChatService {
   }
 
   /// Sends a message in the chat's `messages` subcollection.
-  Future<void> sendMessage(String chatId, String senderId, String text) async {
+  Future<void> sendMessage(
+      String chatId, String senderId, String text, String status) async {
     final messages = _chats.doc(chatId).collection('messages');
     await messages.add({
       'senderId': senderId,
       'text': text,
       'timestamp': FieldValue.serverTimestamp(),
+      'status': status,
     });
   }
 
   /// Streams messages for [chatId], ordered by `timestamp` ascending.
   Stream<List<Message>> getMessages(String chatId) {
-    final messages = _chats.doc(chatId).collection('messages').orderBy('timestamp', descending: false);
-    return messages.snapshots().map((snap) => snap.docs.map((d) => Message.fromDocument(d)).toList());
+    final messages = _chats
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', descending: false);
+    return messages
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Message.fromDocument(d)).toList());
+  }
+
+  updateMessageStatusToRead(String chatId) async {
+    final messageRef = _chats.doc(chatId).collection('messages');
+    final unreadMessages =
+        await messageRef.where('status', isEqualTo: 'unread').get();
+    for (var doc in unreadMessages.docs) {
+      await doc.reference.update({'status': 'read'});
+    }
+  }
+
+  getTotalUnreadMessages(String chatId) async {
+    final messageRef = _chats.doc(chatId).collection('messages');
+    final unreadMessages =
+        await messageRef.where('status', isEqualTo: 'unread').get();
+    return unreadMessages.docs.length;
   }
 }

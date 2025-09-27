@@ -109,6 +109,26 @@ class _FriendRequestsPageState extends ConsumerState<FriendRequestsPage> {
     }
   }
 
+  // Add decline handler: optimistically remove from local list and delete from Firestore.
+  void _decline(String id) async {
+    // Optimistically remove from UI for this session/screen
+    setState(() {
+      _requests.removeWhere((r) => (r['id'] as String?) == id);
+      _acceptedIds.remove(id);
+    });
+
+    // Attempt to delete the request doc from Firestore; ignore errors since snapshot will reconcile
+    try {
+      final docRef = _fs.collection('friend_requests').doc(id);
+      final doc = await docRef.get();
+      if (doc.exists) {
+        await docRef.delete();
+      }
+    } catch (_) {
+      // ignore errors; listener will update UI accordingly
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -164,7 +184,8 @@ class _FriendRequestsPageState extends ConsumerState<FriendRequestsPage> {
                         message: 'Decline',
                         child: OutlinedButton(
                           onPressed: () {
-                            // Decline not implemented yet per requirements
+                            // Decline: delete the request from Firestore
+                            _decline(id);
                           },
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size(40, 40),

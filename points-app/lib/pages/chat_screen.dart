@@ -20,6 +20,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ChatService _svc = ChatService();
   final TextEditingController _ctrl = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  final FocusNode _focus = FocusNode();
   // null value => fetch in progress, non-null => displayName available
   final Map<String, String?> _nameCache = {};
   // chat participants (uids)
@@ -94,6 +95,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _ctrl.dispose();
+    _focus.dispose();
     _scroll.dispose();
     try {
       _messageSub?.cancel();
@@ -117,6 +119,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Send failed: $e')));
     }
+    // Keep the input focused so the caret (vertical line) remains visible
+    _focus.requestFocus();
   }
 
   @override
@@ -253,6 +257,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _ctrl,
+                      focusNode: _focus,
                       decoration: const InputDecoration(hintText: 'Message'),
                       onSubmitted: (_) => _send(),
                     ),

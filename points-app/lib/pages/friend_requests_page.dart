@@ -150,10 +150,9 @@ class _FriendRequestsPageState extends ConsumerState<FriendRequestsPage> {
                     children: [
                       Tooltip(
                         message: accepted ? 'Accepted' : 'Accept',
-                        child: ElevatedButton(
+                        child: OutlinedButton(
                           onPressed: accepted ? null : () => _accept(id),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accepted ? Colors.grey : Theme.of(context).colorScheme.primary,
+                          style: OutlinedButton.styleFrom(
                             minimumSize: const Size(40, 40),
                             padding: EdgeInsets.zero,
                           ),

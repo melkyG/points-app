@@ -8,6 +8,10 @@ import '../models/message.dart';
 import '../services/chat_service.dart';
 import '../providers/auth_provider.dart';
 
+// Global unread counts persisted in memory across page rebuilds.
+// Minimal, in-memory change only; persistent storage/sync is out of scope here.
+final Map<String, int> unreadCountsGlobal = {};
+
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatId;
   const ChatScreen({super.key, required this.chatId});
@@ -31,6 +35,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Clear unread count for this chat when the screen is opened.
+    unreadCountsGlobal[widget.chatId] = 0;
+
     // Subscribe to messages to enable scroll-to-bottom when new messages arrive.
     _messageSub = _svc.getMessages(widget.chatId).listen((list) {
       setState(() {

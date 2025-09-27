@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
-import 'chat_screen.dart';
+import 'chat_screen.dart'; // provides unreadCountsGlobal
 import '../utils/navigation.dart';
 
 class ChatsListPage extends ConsumerStatefulWidget {
@@ -20,11 +20,38 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
   final List<Map<String, dynamic>> _chats = [];
   // ChatService not needed here after pending-open handling moved to FriendsTab
   // per-chat latest-message subscriptions
-  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _msgSubs = {};
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+      _msgSubs = {};
   final Map<String, Map<String, dynamic>> _lastMessages = {};
   // name cache uid -> accountName? (null == loading)
   final Map<String, String?> _nameCache = {};
   // pending-related fields removed; kept simple
+
+  // Helper: extract epoch ms from various timestamp representations in Firestore docs
+  int _extractMillis(dynamic ts) {
+    if (ts == null) return 0;
+    if (ts is Timestamp) return ts.millisecondsSinceEpoch;
+    if (ts is int) return ts;
+    if (ts is DateTime) return ts.millisecondsSinceEpoch;
+    return 0;
+  }
+
+  // Sort chats in-place by latest-message timestamp (fallback to chat.createdAt)
+  void _sortChatsByLatestMessage() {
+    _chats.sort((a, b) {
+      final aId = a['id'] as String;
+      final bId = b['id'] as String;
+      final aLast = _lastMessages[aId];
+      final bLast = _lastMessages[bId];
+      final aTs = aLast != null
+          ? _extractMillis(aLast['timestamp'])
+          : _extractMillis(a['createdAt']);
+      final bTs = bLast != null
+          ? _extractMillis(bLast['timestamp'])
+          : _extractMillis(b['createdAt']);
+      return bTs.compareTo(aTs); // descending: newest first
+    });
+  }
 
   void _startListener() {
     final uid = ref.read(authProvider)?.uid;
@@ -66,22 +93,59 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
             .snapshots()
             .listen((ms) {
           if (ms.docs.isEmpty) {
+            // remove last message if none present
             _lastMessages.remove(id);
+            if (mounted) {
+              _sortChatsByLatestMessage();
+              setState(() {});
+            }
           } else {
             final m = ms.docs.first.data();
-            _lastMessages[id] = m;
-            // Ensure we have name cache for sender and other participant
+
+            // Detect whether this is a new incoming message (not the initial load)
+            final prev = _lastMessages[id];
+            final prevTs = prev != null ? _extractMillis(prev['timestamp']) : 0;
+            final newTs = _extractMillis(m['timestamp']);
             final senderId = (m['senderId'] as String?) ?? '';
-            if (senderId.isNotEmpty && !_nameCache.containsKey(senderId)) _fetchAndCacheName(senderId);
+
+            // Update cache first
+            _lastMessages[id] = m;
+
+            // Notify by incrementing unread count only if we had a previous value (so initial load doesn't notify),
+            // the new timestamp is greater than previous, and sender is not the current user.
+            final currentUid = ref.read(authProvider)?.uid;
+            final shouldMarkUnread = prev != null &&
+                newTs > prevTs &&
+                senderId.isNotEmpty &&
+                senderId != currentUid;
+
+            if (shouldMarkUnread) {
+              unreadCountsGlobal[id] = (unreadCountsGlobal[id] ?? 0) + 1;
+            }
+
+            // Ensure we have name cache for sender and other participant
+            if (senderId.isNotEmpty && !_nameCache.containsKey(senderId))
+              _fetchAndCacheName(senderId);
             final parts = c['participants'] as List;
             for (final p in parts) {
               final pid = p?.toString() ?? '';
-              if (pid.isNotEmpty && !_nameCache.containsKey(pid)) _fetchAndCacheName(pid);
+              if (pid.isNotEmpty && !_nameCache.containsKey(pid))
+                _fetchAndCacheName(pid);
+            }
+
+            if (mounted) {
+              _sortChatsByLatestMessage();
+              setState(() {});
             }
           }
-          if (mounted) setState(() {});
         });
         _msgSubs[id] = sub;
+      }
+
+      // After ensuring listeners are active, sort chats once (in case no per-chat listeners fired)
+      if (mounted) {
+        _sortChatsByLatestMessage();
+        setState(() {});
       }
     });
   }
@@ -168,16 +232,47 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                       subtitleText = null;
                     }
 
+                    // unread count for this chat (persisted globally)
+                    final unread = unreadCountsGlobal[id] ?? 0;
+
                     return ListTile(
-                      title: Text(titleText),
-                      subtitle: subtitleText != null ? Text(subtitleText) : null,
+                      // show name and unread badge next to it
+                      title: Row(
+                        children: [
+                          Expanded(child: Text(titleText)),
+                          if (unread > 0)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Text(
+                                unread.toString(),
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onPrimary,
+                                    fontSize: 12),
+                              ),
+                            ),
+                        ],
+                      ),
+                      subtitle:
+                          subtitleText != null ? Text(subtitleText) : null,
                       onTap: () {
+                        // clear unread count for this chat when user opens it
+                        if ((unreadCountsGlobal[id] ?? 0) > 0) {
+                          unreadCountsGlobal[id] = 0;
+                          setState(() {}); // reflect change in the list UI
+                        }
+
                         final nav = messagingNavigatorKey.currentState;
                         if (nav != null) {
-                          nav.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: id)));
+                          nav.push(MaterialPageRoute(
+                              builder: (_) => ChatScreen(chatId: id)));
                         } else {
                           // Fallback to local context if nested navigator isn't ready
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: id)));
+                          Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => ChatScreen(chatId: id)));
                         }
                       },
                     );

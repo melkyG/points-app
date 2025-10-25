@@ -106,7 +106,7 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
             // remove last message if none present
             _lastMessages.remove(id);
             // fetch unread count (should be zero but ensure consistent)
-            _chatService.getTotalUnreadMessages(id).then((cnt) {
+            _chatService.getTotalUnreadMessages(id, uid).then((cnt) {
               _unreadCounts[id] = cnt;
               if (mounted) {
                 _sortChatsByLatestMessage();
@@ -136,7 +136,7 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
             }
 
             // Fetch the authoritative unread count from backend for this chat
-            _chatService.getTotalUnreadMessages(id).then((cnt) {
+            _chatService.getTotalUnreadMessages(id, uid).then((cnt) {
               _unreadCounts[id] = cnt;
               if (mounted) {
                 _sortChatsByLatestMessage();
@@ -158,7 +158,7 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
       for (final c in _chats) {
         final id = c['id'] as String;
         if (!_unreadCounts.containsKey(id)) {
-          _chatService.getTotalUnreadMessages(id).then((cnt) {
+          _chatService.getTotalUnreadMessages(id, uid).then((cnt) {
             _unreadCounts[id] = cnt;
             if (mounted) setState(() {});
           }).catchError((_) {});
@@ -290,7 +290,7 @@ class _ChatsListPageState extends ConsumerState<ChatsListPage> {
                           subtitleText != null ? Text(subtitleText) : null,
                       onTap: () async {
                         // mark messages as read in backend and clear local cached unread count
-                        await _chatService.updateMessageStatusToRead(id);
+                        await _chatService.updateMessageStatusToRead(id, uid);
                         _unreadCounts[id] = 0;
                         if (mounted) setState(() {});
 

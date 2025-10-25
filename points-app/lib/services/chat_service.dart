@@ -70,19 +70,34 @@ class ChatService {
         .map((snap) => snap.docs.map((d) => Message.fromDocument(d)).toList());
   }
 
-  updateMessageStatusToRead(String chatId) async {
+  updateMessageStatusToRead(String chatId, [String? myUid]) async {
     final messageRef = _chats.doc(chatId).collection('messages');
+    // fetch unread messages, then filter client-side to avoid including my own messages
     final unreadMessages =
         await messageRef.where('status', isEqualTo: 'unread').get();
     for (var doc in unreadMessages.docs) {
-      await doc.reference.update({'status': 'read'});
+      try {
+        final sender = (doc.data()['senderId'] ?? '') as String;
+        if (myUid != null && sender == myUid) {
+          // skip marking my own messages as read
+          continue;
+        }
+        await doc.reference.update({'status': 'read'});
+      } catch (_) {}
     }
   }
 
-  getTotalUnreadMessages(String chatId) async {
+  getTotalUnreadMessages(String chatId, [String? myUid]) async {
     final messageRef = _chats.doc(chatId).collection('messages');
     final unreadMessages =
         await messageRef.where('status', isEqualTo: 'unread').get();
-    return unreadMessages.docs.length;
+    if (myUid == null) return unreadMessages.docs.length;
+    // count only messages not sent by me
+    int cnt = 0;
+    for (var doc in unreadMessages.docs) {
+      final sender = (doc.data()['senderId'] ?? '') as String;
+      if (sender != myUid) cnt++;
+    }
+    return cnt;
   }
 }
